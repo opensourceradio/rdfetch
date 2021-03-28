@@ -1,0 +1,88 @@
+# RPM SPEC file for rdfetch.
+# Place this file in ${SOMEDIR}/rpmbuild/SPECS,
+# Place the source tarball and the patch file in ${SOMEDIR}/rpmbuild/SOURCES
+# Grab a SHA256 sum of the tarball and place it in ${SOMEDIR}/rpmbuild/SOURCES/rdfetch-${VERSION}.tar.gz-sha256sum
+# Run rpmbuild -bb ${SOMEDIR}/rpmbuild/SPECS/rdfetch.spec
+# Run sudo yum install ${SOMEDIR}/rpmbuild/RPMS/noarch/rdfetch-${VERSION}-${RELEASE}.el7.noarch.rpm
+Name: rdfetch
+# This package complies with Semantic Versioning: http://semver.org/
+%define vMajor 0
+%define vMinor 3
+%define vPatch 7
+%define vHash $Hash$
+Version: %{vMajor}.%{vMinor}.%{vPatch}
+Release: 1%{?dist}
+Summary: A Rivendell podcast fetcher
+BuildArch: noarch
+License: GPLv3
+Group: Productivity/Multimedia/Other
+URL: https://github.com/opensourceradio/%{name}
+
+Source0: %{name}-%{version}.tar.gz
+Source1: https://github.com/opensourceradio/%{name}/archive/%{name}-%{version}.tar.gz
+Source500: %{name}-%{version}.tar.gz.sha256
+
+Requires: zsh >= 5.0
+Requires: coreutils >= 8.5
+Requires: findutils >= 4.0.0
+Requires: grep >= 2.0.0
+Requires: gawk >= 4.0.0
+Requires: sed >= 4.0.0
+Requires: podget = 0.8.5
+Requires: gnome-terminal
+Requires: libxslt >= 1.0.28
+
+%define tartopdir %{name}-%{version}
+%define homerd /home/rd
+%define rduser rd
+
+%description
+RDFetch is a podcast fetcher that integrates tightly with the
+Rivendell radio automation system. RDFetch consists of a front end to
+podget(1), the simple podcast fetcher, and a text-based Rivendell
+dropbox configurator wizard.
+
+%prep
+( cd %_sourcedir; sha256sum -c %{SOURCE500}; )
+%setup -q -n %{tartopdir}
+
+%build
+%configure
+
+%install
+%make_install
+
+%post
+if [ -x %{_bindir}/gtk-update-icon-cache ] ; then
+  %{_bindir}/gtk-update-icon-cache -f --quiet %{_datadir}/icons/gnome  || :
+fi
+
+%postun
+if [ -x %{_bindir}/gtk-update-icon-cache ] ; then
+  %{_bindir}/gtk-update-icon-cache --quiet %{_datadir}/icons/gnome || :
+fi
+
+%files
+%defattr(-,root,root,-)
+%doc COPYING README README.md %{name}.pdf %{name}.html
+%{_bindir}/%{name}
+%{_bindir}/podget-wrapper
+%{_bindir}/zsh-functions
+%{_datadir}/icons/gnome/scalable/apps/%{name}.svg
+%{_datadir}/applications/%{name}.desktop
+%{_sysconfdir}/xdg/menus/applications-merged/rdfetch-rivendell.menu
+%{_mandir}/man*/*
+%config(noreplace) %{homerd}/rdfetch/configuration/msmtp.rdfetch
+%config(noreplace) %{homerd}/rdfetch/configuration/notifyrc
+%config(noreplace) %{homerd}/rdfetch/configuration/podgetrc
+%config(noreplace) %{homerd}/rdfetch/configuration/serverlist
+%dir %{homerd}/rdfetch/log/archive
+%dir %{homerd}/rdfetch/podcasts
+%dir %{homerd}/rdfetch/tmp
+%attr(-,%{rduser},%{rduser}) %{homerd}/rdfetch
+
+%changelog
+* Mon Aug 24 2020 David Klann <dklann@broadcasttool.com> - %{vMajor}.%{vMinor}.%{vPatch}-1
+- Created.
+* Sun Mar 28 2021 David Klann <dklann@broadcasttool.com> - %{vMajor}.%{vMinor}.%{vPatch}-1
+- standards updates to zsh-functions.in - shellcheck, etc.

@@ -1,0 +1,21 @@
+# msmtprc for RDFetch
+# See examples in /usr/share/doc/msmtp.
+
+# Set default values for all following accounts.
+defaults
+tls on
+#tls_starttls on
+tls_certcheck off
+syslog LOG_MAIL
+from envelope_from
+
+# The default account (see below).
+# Add others (if desired) before the last line.
+account rdfetch
+host %MAIL-HOST%
+port %MAIL-PORT%
+user %MAIL-USER%
+password %MAIL-PASSWORD%
+auth login
+
+account default : rdfetch

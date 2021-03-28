@@ -1,0 +1,1555 @@
+#!/bin/zsh
+# shellcheck shell=bash disable=SC2016,SC2028,SC2051,SC2064,SC2086,SC2154,SC2162
+# Globally ignore shellcheck directives:
+# SC2016 because our menu entries do not want the variables expanded until used.
+# SC2028 because escape sequences in ZSH actually work with echo.
+# SC2034 because those 'apparently unused' variable are actually used.
+# SC2051 because unlike BASH, ZSH supports variables in brace range expansions.
+# SC2064 because I want the trap expressions to be evaluated when the traps are set.
+# SC2086 because sometimes things are alreaedy double-quoted.
+# SC2154 because those variables that are 'referenced but not assigned' actually are assigned.
+# SC2162 because we do not care about backslashes in values read from STDIN.
+
+##########################################################################################
+##########################################################################################
+##
+##
+## rdfetch
+##
+## Copyright 2020, David Klann <dklann@broadcasttool.com>
+##
+## A Broadcast Tool & Die tool to manage podcast feeds (i.e., RSS,
+## ATOM, etc.)  and downloads by podget(1), for later import into a
+## Rivendell library.
+##
+##########################################################################################
+##########################################################################################
+
+setopt NO_CASE_MATCH FUNCTION_ARGZERO
+zmodload zsh/regex
+zmodload zsh/datetime
+zmodload zsh/terminfo
+zmodload zsh/stat
+autoload colors
+colors
+
+# This script complies with Semantic Versioning: http://semver.org/
+vMajor=
+vMinor=3
+vPatch=7
+vHash='$Hash$'
+
+# Get zsh functions necessary for this script.
+if [[ -r @bindir@/zsh-functions ]] ; then
+  source @bindir@/zsh-functions
+else
+  exit "$(error 'Cannot read support library @bindir@/zsh-functions. Please consult your tarot card reader!')"
+fi
+
+##########################################################################################
+## Locally defined subroutines
+##########################################################################################
+
+# How to use this command.
+usage() {
+  myName=${1}
+
+  ${CAT} << EOF
+${myName}: add a new RSS feed to the list of podcasts.
+
+Summary: ${myName##*/} [ --verbose (-v) ] [ --version (-V) ] [ --help (-h) ]
+                       [ --config (-c) <podget_configuration_file> ]
+                       [ --dir_config (-d) <podget_configuration_directory> ]
+
+
+${myName##*/} is a text-menu driven command-line tool for fetching and
+importing audio files from podcasts (also known as RSS feeds) into the
+Rivendell Radio Automation System.  By default, a new cart will be
+created for each podcast, although this behavior can be modified by
+choosing the appropriate option when adding a podcast.
+
+${myName##*/} leads you through the process using a text-based wizard,
+asking questions about the podcast you want to retrieve and where to
+store the audio in Rivendell.
+
+EOF
+}
+
+addOrReplaceFeed() {
+  local myName=${1} ; shift
+  local verbose=${1}
+
+  local feedURL feedUser feedPassword protocol hostANDport route urlWithCredentials titleParserXSL
+  local feedTitle name group rivendellGroupList
+  local backupServerlist=/var/tmp/${CONFIG_SERVERLIST##*/}
+  local replaceFeed=0 addNewFeed=1
+  local ok returnValue=0
+
+  if ! okDatabaseStructure GROUPS:name "${verbose}" ; then
+    returnValue="${?}"
+    echo "${0}() (${zsh_eval_context}): This version of ${myName} is not compatible with Rivendell database version '$(rdDatabaseVersion)'."
+    read ok\?"Press <Enter> to continue. "
+    return "${returnValue}"
+  fi
+
+  trap 'trap - ; return ;' 0 1 2 3
+
+  # Make a backup copy of serverlist before we make any changes.
+  ${CP} ${DIR_CONFIG}/${CONFIG_SERVERLIST} ${backupServerlist}
+
+  read feedURL\?"Type or paste the RSS feed URL for this podcast: "
+
+  if getYesNo "Does this podcast download require a username?" ; then
+    echo
+    read feedUser\?"Type or paste the feed username and press <Enter>: "
+
+    if getYesNo "Does this URL require a password for the user ${feedUser}?" ; then
+      echo
+      read feedPassword\?"Type the password for the user '${feedUser}' and press <Enter>: "
+    fi
+
+    protocol=${feedURL%://*}
+    hostANDport=${${feedURL#${protocol}://}%%/*}
+    route=${feedURL#${protocol}://${hostANDport}}
+
+    # ${urlWithCredentials} is used below only to try to obtain the feed title.
+    urlWithCredentials=${protocol}://${feedUser}${feedPassword:+:${feedPassword}}@${hostANDport}/${route}
+  fi
+  echo
+
+  titleParserXSL=$(makeParser /rss/channel/title)
+  trap "${RM} -f ${titleParserXSL} ; trap - ; return ;" 0 1 2 3
+
+  ##########################################################################################
+  ## Get the feed title, either by its own XML (with xsltproc), or by
+  ## brute force with (wget). This code snippet and the XSL parser
+  ## snippet lifted from bashpodder, http://www.lincgeek.org/bashpodder/
+  ## (link retrieved Tue Aug 9 11:27:36 CDT 2016)
+  ##########################################################################################
+  feedTitle=$(${XSLTPROC} ${titleParserXSL} "${urlWithCredentials:-${feedURL}}" 2>/dev/null ||
+		 ${WGET} -q "${urlWithCredentials:-${feedURL}}" -O - | ${GREP} -m 1 '<title>' | ${SED} -e 's,^ *<title>\(.*\)</title>.*$,\1,')
+  if [[ -z "${feedTitle}" ]] ; then
+
+    # Try it without the username and password.
+    if [[ -n "${urlWithCredentials}" ]] ; then
+
+      feedTitle=$(${XSLTPROC} ${titleParserXSL} "${feedURL}" 2>/dev/null ||
+		     ${WGET} -q "${feedURL}" -O - | ${GREP} -m 1 '<title>' | ${SED} -e 's,^ *<title>\(.*\)</title>.*$,\1,')
+
+    else
+
+      warning "I could not discern the title for this feed. Please make sure the URL, username (if needed) and password (if needed) are correct and if necessary, re-run ${myName}."
+
+    fi
+  fi
+
+  ${RM} -f ${titleParserXSL}
+  trap 'trap - ; return ;' 0 1 2 3
+
+  ##########################################################################################
+  ## Prompt for a name, use the feed title previously obtained if the
+  ## user does not enter anything.
+  ##########################################################################################
+  read name\?"Enter a name for this podcast (${BOLD}Note: I may do some manipulation of the name${NORM}): ${feedTitle:+[${feedTitle}]} "
+  [[ -z "${name}" ]] && name=${feedTitle}
+  # From the inside out, this parameter substitution does the following:
+  #    converts the characters <Space> <Comma> : ! # * ? < > & $ / ( ) + to a dash ("-")
+  #    deletes single (') and double (") quotes
+  #    deletes a single dash ("-") at the end of the string
+  # The sed(1) expression replaces two or more dashes ("-") with a single dash.
+  cleanName=$(echo ${${${name//[: ,\!\?\&\$\/\)\(\#\*\\\>\<\+]/-}//[\"\']/}/%-/} | ${SED} -e 's/--*/-/g')
+  read ok\?"Using ${cleanName} for the podcast name. Is this OK? [y or n]: "
+  until [[ ${ok} =~ [Yy] ]] ; do
+
+    echo
+    read name\?"OK, try again. Enter a name for this podcast: "
+    cleanName=$(echo ${${${name//[: ,\!\?\&\$\/\)\(\#\*\\\>\<\+]/-}//[\"\']/}/%-/} | ${SED} -e 's/--*/-/g')
+    read ok\?"Using '${cleanName}' for the podcast name. Is this OK? [y or n]: "
+
+  done
+  feedName="${cleanName}"
+
+  ##########################################################################################
+  ## Get the "category" for this podcast. Use a Rivendell GROUP for the category name.
+  ##########################################################################################
+  # See zsh-functions for the definition of doSQL.
+  rivendellGroupList=$(doSQL "select NAME from GROUPS where DEFAULT_CART_TYPE=1 order by NAME")
+
+  # List the groups and prompt them for a group to use if they asked for
+  # a list or if they did not name a group.
+  if [[ -z "${group}" ]] || [[ "${group}" =~ list ]] ; then
+
+    echo "\nCurrent list of GROUPs:"
+    ${COLUMN} -x -c $(( COLUMNS > 80 ? 78 : COLUMNS )) <<< ${rivendellGroupList}
+    read group\?"Type the name of the Rivendell GROUP into which this podcast will be imported: "
+
+  fi
+
+  ##########################################################################################
+  ## Validate the group against the current known list of groups in the
+  ## Rivendell database.
+  ##########################################################################################
+  until ${GREP} -q "^${group}$" <<< ${rivendellGroupList} ; do
+
+    warning "'${group}' is not in the list. Please use a valid GROUP name."
+
+    echo "Current list of GROUPs:"
+    ${COLUMN} -x -c $(( COLUMNS > 80 ? 78 : COLUMNS )) <<< ${rivendellGroupList}
+    read group\?"Enter the Rivendell GROUP into which this podcast will be imported: "
+
+  done
+
+  (( verbose )) && warning "${myName} (verbose): ${feedURL} ${group} ${feedName}${feedUser:+' USER:${feedUser}'}${feedPassword:+' PASS:${feedPassword}'}"
+  echo
+
+  ##########################################################################################
+  ## Add the feed to CONFIG_SERVERLIST
+  ##########################################################################################
+  [[ -w "${DIR_CONFIG}/${CONFIG_SERVERLIST}" ]] ||
+    return "$(error 'Missing access rights to modify the file ${DIR_CONFIG}/${CONFIG_SERVERLIST}')"
+
+  local tmpfile
+  tmpfile=$(${MKTEMP})
+
+  trap "${RM} -f ${tmpfile}; trap - ; return ;" 0 1 2 3
+
+  # Same group and name (possibly different URL?).
+  if ${GREP} -P -q "^[^#].*\s+${group}\s+${feedName}\s*" ${DIR_CONFIG}/${CONFIG_SERVERLIST} ; then
+
+    addNewFeed=0
+    if getYesNo "${feedName} already exists in group ${group}. Replace?" ; then
+
+      ${GREP} -P -v "^[^#].*\s+${group}\s+${feedName}\s*" ${DIR_CONFIG}/${CONFIG_SERVERLIST} > ${tmpfile}
+      replaceFeed=1
+
+    fi
+
+  # Same name, different group.
+  elif ${GREP} -P -q "^[^#].*\s+${feedName}\s*" ${DIR_CONFIG}/${CONFIG_SERVERLIST} ; then
+
+    addNewFeed=0
+    if getYesNo "${feedName} already exists in a different group. Change to group '${group}'?" ; then
+
+      ${GREP} -P -v "^[^#].*\s+${feedName}\s*" ${DIR_CONFIG}/${CONFIG_SERVERLIST} > ${tmpfile}
+      replaceFeed=1
+
+    fi
+  fi
+
+  if (( addNewFeed || ! replaceFeed )) ; then
+
+    # A new feed.
+    ${CP} ${DIR_CONFIG}/${CONFIG_SERVERLIST} ${tmpfile}
+
+  fi
+
+  if (( addNewFeed || replaceFeed )) ; then
+
+      ${CAT} <<EOF >> ${tmpfile}
+${feedURL} ${group} ${feedName}${feedUser:+" USER:${feedUser}"}${feedPassword:+" PASS:${feedPassword}"}
+EOF
+
+  fi
+
+  if [[ -s ${tmpfile} ]] ; then
+
+    # There should be no more than two lines of difference between the
+    # original and the edited file.
+    if (( $(${DIFF} --side-by-side --suppress-common-lines ${DIR_CONFIG}/${CONFIG_SERVERLIST} ${tmpfile} | ${WC} -l) <= 2 )) ; then
+
+      # We made a tmpfile, so replace serverlist with its contents.
+      ${MV} ${tmpfile} ${DIR_CONFIG}/${CONFIG_SERVERLIST} ||
+	return "$(error 'Could not replace ${DIR_CONFIG}/${CONFIG_SERVERLIST}.')"
+
+      ${CHMOD} 644 ${DIR_CONFIG}/${CONFIG_SERVERLIST}
+
+      ${MKDIR} -p ${DIR_LIBRARY}/${group}/${feedName} ||
+	warning "Failed to create new podcast directory ${DIR_LIBRARY}/${group}/${feedName} (${?}). You may have to create this yourself."
+
+      echo
+
+      ##########################################################################################
+      ## Offer to create a Rivendell dropbox if we are making changes
+      ## to this podcast (new or replace).
+      ##########################################################################################
+      if addRDDropbox ${myName} ${DIR_LIBRARY} ${feedName} ${group} ${verbose} ; then
+
+	# Second arg indicates we are calling rdDropboxStatus interactively.
+	rdDropboxStatus ${myName} 1 ${verbose}
+
+      fi
+
+      read ok\?"Podcast $( (( replaceFeed )) && echo replaced || echo added). Press <Enter> to continue. "
+
+    else
+
+      returnValue=$(error "Found an unexpected error in the new podcast feed file while attempting to add '${feedName}'")
+      echo "Restoring backup. Please notify the authorities!"
+
+      (( verbose )) && { echo "${myName} (verbose):" ; ${DIFF} --side-by-side --suppress-common-lines ${DIR_CONFIG}/${CONFIG_SERVERLIST} ${tmpfile} ; }
+      ${MV} ${backupServerlist} ${DIR_CONFIG}/${CONFIG_SERVERLIST}
+
+      read ok\?"Press <Enter> to continue. "
+
+    fi
+
+  else
+
+    returnValue=$(error "Found an empty podcast feed file while attempting to add feed '${feedName}'")
+    echo "Restoring backup. Please notify the authorities!"
+
+    ${MV} ${backupServerlist} ${DIR_CONFIG}/${CONFIG_SERVERLIST}
+
+    read ok\?"Press <Enter> to continue. "
+
+  fi
+
+  trap -
+}
+
+enableFeed() {
+  local myName=${1} ; shift
+  local verbose=${1}
+
+  local feedList feedNameEntered feedName group tmpfile
+
+  trap 'trap - 0 1 2 3 ; return ;' 0 1 2 3
+
+  feedList=$(${GREP} '^#DISABLED#' ${DIR_CONFIG}/${CONFIG_SERVERLIST} | ${AWK} '{print $3}')
+
+  # Try to enable feeds only if there actually are any disabled ones.
+  if [[ -n "${feedList}" ]] ; then
+
+    if (( $(${WC} -l <<<${feedList}) > 1 )) ; then
+
+      echo "Current list of disabled podcast feeds:"
+      ${COLUMN} -x -c $(( COLUMNS > 80 ? 78 : COLUMNS )) <<< ${feedList}
+      read feedNameEntered\?"Type or paste the name of the podcast you want to enable and press <Enter>: "
+
+      # Allow '*'-style wildcards in the feedName, will expand it below.
+      until feedName=$(${GREP} -i "^${feedNameEntered//\*/.*}$" <<< ${feedList}) ; do
+
+	warning "'${feedNameEntered}' is not in the list. Please use a valid feed name."
+
+	echo "Current list of disabled podcast feeds:"
+	${COLUMN} -x -c $(( COLUMNS > 80 ? 78 : COLUMNS )) <<< ${feedList}
+	read feedNameEntered\?"Type or paste the name of the podcast ('*' wildcard OK) you want to enable: "
+
+      done
+
+    else
+
+      # There is only one feed to enable, so prompt to enable it.
+      feedName=${feedList}
+      read ok\?"Press 'y' to enable the feed '${feedName}', or any other key to cancel: "
+      if [[ "${ok}" != 'y' ]] ; then
+	trap -
+	return
+      fi
+      echo
+
+    fi
+
+    echo "Enabling '${feedName}' in the feed list... \c"
+
+    trap "${RM} -f ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak ; trap - ; return ;" 0 1 2 3
+
+    ${SED} -i.bak -e "/^#DISABLED#.*[[:space:]]${feedName}[[:space:]]*/s/^#DISABLED#//" ${DIR_CONFIG}/${CONFIG_SERVERLIST}
+    # The sed command *should* result in exactly one line of
+    # difference between the original and the edited file.
+    if (( $(${DIFF} --side-by-side --suppress-common-lines ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak ${DIR_CONFIG}/${CONFIG_SERVERLIST} | ${WC} -l) == 1 )) ; then
+
+      ${RM} -f ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak
+
+      group=$(${AWK} "/[[:space:]]${feedName}[[:space:]]*/{print \$2}" ${DIR_CONFIG}/${CONFIG_SERVERLIST})
+
+      if [[ ! -d ${DIR_LIBRARY}/${group}/${feedName} ]] ; then
+	${MKDIR} -p ${DIR_LIBRARY}/${group}/${feedName} ||
+	  warning "Failed to create new podcast directory ${DIR_LIBRARY}/${group}/${feedName} (${?}). You may have to create this yourself."
+      fi
+
+      # Offer to create a Rivendell dropbox if we are making changes
+      # to this podcast (new or replace).
+      if addRDDropbox ${myName} ${DIR_LIBRARY} ${feedName} ${group} ${verbose} ; then
+
+	# Second arg indicates we are calling rdDropboxStatus interactively.
+	rdDropboxStatus ${myName} 1 ${verbose}
+
+      fi
+      echo "Done."
+
+    else
+
+      warning "Could not properly enable the disabled podcast feed '${feedName}'.
+Please fix the file '${DIR_CONFIG}/${CONFIG_SERVERLIST}' manually."
+
+      ${RM} -f ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak
+
+    fi
+
+    read ok\?"Press <Enter> to continue. "
+
+  else
+
+    read ok\?"There are no disabled feeds available. Press <Enter> to continue. "
+
+  fi
+
+  trap -
+}
+
+deleteFeed() {
+  local myName=${1} ; shift
+  local verbose=${1}
+
+  local feedList feedNameEntered feedName deleteOrDisable tmpfile group
+
+  trap 'trap - ; return ;' 0 1 2 3
+
+  feedList=$(${GREP} -v '^#' ${DIR_CONFIG}/${CONFIG_SERVERLIST} | ${AWK} '{print $3}' | ${SORT})
+
+  # Delete feeds only if there actually are any available.
+  if [[ -z "${feedList}" ]] ; then
+    read ok\?"There are no feeds available to delete. Press <Enter> to continue. "
+    trap -
+    return
+  fi
+
+  # Prompt for a feed to delete only if there is more than one in
+  # the list.
+  if (( $(${WC} -l <<<${feedList}) > 1 )) ; then
+
+    echo "Current list of podcast feeds:"
+    ${COLUMN} -x -c $(( COLUMNS > 80 ? 78 : COLUMNS )) <<< ${feedList}
+    read feedNameEntered\?"Enter the name of the podcast ('*' wildcard OK) you want to delete or disable (and press <Enter>): "
+
+    until feedName=$(${GREP} "^${feedNameEntered//\*/.*}$" <<< ${feedList}) ; do
+
+      warning "'${feedNameEntered}' is not in the list. Please use a valid feed name."
+
+      echo "Current list of podcast feeds:"
+      ${COLUMN} -x -c $(( COLUMNS > 80 ? 78 : COLUMNS )) <<< ${feedList}
+      read feedNameEntered\?"Enter the name of the podcast ('*' wildcard OK) you want to delete or disable: "
+
+    done
+
+  else
+
+    # Only one feed, so offer it for deletion.
+    feedName=${feedList}
+
+  fi
+
+  group=$(${AWK} "/[[:space:]]${feedName}[[:space:]]*/{print \$2}" ${DIR_CONFIG}/${CONFIG_SERVERLIST})
+  (( verbose )) && warning "${myName} (verbose): deleting '${feedName}' from '${group}'."
+
+  read deleteOrDisable\?"Do you want to disable (d) or delete (D) '${feedName}'? "
+  until [[ "${deleteOrDisable}" =~ [Dd] ]] ; do
+    echo
+    read deleteOrDisable\?"Please type a lower case 'd' for 'disable' or an upper case 'D' for 'delete' and press <Enter>"
+  done
+  echo
+
+  if [[ "${deleteOrDisable}" = 'd' ]] ; then
+    echo "Disabling '${feedName}' in the feed list... \c"
+
+    trap "${RM} -f ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak ; trap - ; return ;" 0 1 2 3
+
+    ${SED} -i.bak -e "/[[:space:]]${feedName}[[:space:]]*/s/^/#DISABLED#/" "${DIR_CONFIG}/${CONFIG_SERVERLIST}"
+    # The sed command *should* result in exactly one line of
+    # difference between the original and the edited file.
+    if (( $(${DIFF} --side-by-side --suppress-common-lines ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak ${DIR_CONFIG}/${CONFIG_SERVERLIST} | ${WC} -l) != 1 )) ; then
+      warning "Could not properly disable the podcast feed '${feedName}'. Please fix the file '${DIR_CONFIG}/${CONFIG_SERVERLIST}' manually."
+    fi
+
+    ${RM} -f ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak
+
+    trap 'trap - ; return ;' 0 1 2 3
+  elif [[ "${deleteOrDisable}" = 'D' ]] ; then
+    echo "Deleting feed '${feedName}' from the feed list... \c"
+
+    tmpfile=$(${MKTEMP})
+    trap "${RM} -f ${tmpfile}; trap - ; return ;" 0 1 2 3
+
+    ${GREP} -v "[[:space:]]${feedName}[[:space:]]*" ${DIR_CONFIG}/${CONFIG_SERVERLIST} > ${tmpfile}
+
+    if [[ -s ${tmpfile} ]] ; then
+      if ${MV} ${tmpfile} ${DIR_CONFIG}/${CONFIG_SERVERLIST} ; then
+	echo "Done."
+
+	if getYesNo "Do you want to delete the dropbox for this feed too?" ; then
+	  echo
+	  if cleanupFeed ${myName} ${group} ${feedName} ${verbose} ; then
+	    if deleteRDDropbox ${myName} ${DIR_LIBRARY}/${group}/${feedName} ${verbose} ; then
+	      echo "Purged dropbox for feed '${feedName}'."
+	    else
+	      warning "Unable to successfully delete the dropbox for feed '${feedName}'. Please consult a professional."
+	    fi
+	  else
+	    warning "Unable to successfully clean up the cruft lying about for feed '${feedName}' (${?}). Please report this number to the authorities."
+	  fi
+	else
+	  echo "\nOK. Not deleting the dropbox for feed '${feedName}'."
+	fi
+      else
+	warning "Could not replace '${DIR_CONFIG}/${CONFIG_SERVERLIST}' with the deleted podcast feed. Do you have the access rights to replace this file? Please fix the file '${DIR_CONFIG}/${CONFIG_SERVERLIST}' manually."
+      fi
+    else
+      warning "Unable to find '${feedName}' in ${DIR_CONFIG}/${CONFIG_SERVERLIST}. Please fix the file ${DIR_CONFIG}/${CONFIG_SERVERLIST} manually."
+    fi
+  else
+    echo "\nWTF? How did you get past the prompt without entering a 'd' or a 'D'?"
+  fi
+
+  read ok\?"Press <Enter> to continue. "
+
+  trap -
+}
+
+showFeeds() {
+  local myName=${1} ; shift
+  local verbose=${1}
+
+  local activeCount=0 disabledCount=0
+
+  activeCount=$(${GREP} -c -Ev '^\s*(#|$)' ${DIR_CONFIG}/${CONFIG_SERVERLIST})
+  disabledCount=$(${SED} -e '1,/^# ---------/d' < ${DIR_CONFIG}/${CONFIG_SERVERLIST} | ${GREP} -c '^#DISABLED#')
+
+  trap 'trap - ; return ;' 0 1 2 3
+
+  (
+    # The header.
+    reportTitleText="${activeCount} RDFetch Podcasts ($( ((disabledCount > 0 )) && echo ${RED})${disabledCount} Disabled${NORM})"
+    reportTitle="$(printf ' %.0s' {1..$(( (terminfo[cols] - ${#reportTitleText}) / 2))})${BOLD}${reportTitleText}${NORM}"
+    printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
+    print "${reportTitle}"
+    printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
+    printf '%-46s %-16s %-48s\n'  "Title" "Group" "Credentials"
+    printf '-%.0s' {1..46}; printf '-%.0s' {1..16}; printf '-%.0s' {1..48}; print
+
+    # The content: remove the boilerplate prefix and empty lines from
+    # the file, sort the list by feed title (field 3), then group
+    # (field 2).
+    ${SED} -e '1,/^# ---------/d' < ${DIR_CONFIG}/${CONFIG_SERVERLIST} |
+      ${GREP} -v '^ *$' |
+      ${SORT} --ignore-case --key=3,3 --key=2,2 |
+      while read url group title rest ; do
+	if [[ ${url} =~ ^#DISABLED#.* ]] ; then
+	  rdDropBoxPath="${RED}DISABLED:${NORM} RD dropbox: ${DIR_LIBRARY}/${group}/${title}/*.mp3"
+	  title="${RED}DISABLED:${NORM} ${title}"
+	  url="${RED}DISABLED:${NORM} ${url/\#DISABLED#/}"
+	else
+	  rdDropBoxPath="RD dropbox: ${DIR_LIBRARY}/${group}/${title}/*.mp3"
+	fi
+
+	printf '%-46s %-16s %-48s\n%-80s\n%-80s\n\n' ${title} ${group} ${rest:-""} ${url} ${rdDropBoxPath}
+      done
+
+    # The footer.
+    printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
+  ) | ${LESS} -RCiP "Viewing podcast feeds?e (End of Output).\. Press <q> to quit, <PgDown> and <PgUP> to scroll, <g> to -Beginning-, <G> to -End-\."
+
+  trap -
+}
+
+showLastStatus() {
+  local myName=${1} ; shift
+  local type=${1} ; shift
+  local verbose=${1}
+
+  local statusFile="${STATUS_FILE:-/var/tmp/podget-wrapper.${type}}"
+  local fileTime
+
+  trap 'trap - ; return ;' 0 1 2 3
+
+  case ${type} in
+    out) OUTPUT="output results" ;;
+    err) OUTPUT="diagnostic output" ;;
+    *) { print "${myName}: showLastStatus(): need to specify a file type." ; trap - ; return ; } ;;
+  esac
+
+  if [[ -f ${statusFile} ]] ; then
+    if [[ -r ${statusFile} ]] ; then
+      if zstat -H statusStat ${statusFile} ; then
+	fileTime=$(strftime "%A, %B %d, %Y at %T" ${statusStat[mtime]})
+
+	(
+	  # The header.
+	  reportTitleText="Latest RDFetch 'podget' ${(C)OUTPUT}"
+	  if [[ -n "${fileTime}" ]] ; then
+	    reportTitleText="${reportTitleText} as of ${fileTime}"
+	  fi
+	  # Center the title on the display.
+	  reportTitle="$(printf ' %.0s' {1..$(( (terminfo[cols] - ${#reportTitleText} ) / 2))})${BOLD}${reportTitleText}${NORM}"
+	  printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
+	  print "${reportTitle}"
+	  printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
+
+	  # The data.
+	  ${CAT} ${statusFile}
+
+	  # The footer.
+	  printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
+	) | ${LESS} -RCiP "Viewing the latest podget ${OUTPUT}?e (End of Output).\. Press <q> to quit, <PgDown> and <PgUP> to scroll, <g> to -Beginning-, <G> to -End-\."
+
+      else
+	warning "Could not determine the time of last access of '${statusFile}' (${?}). Please seek professional help."
+	read ok\?"Press <Enter> to continue. "
+      fi
+
+    else
+      warning "RDFetch status file '${statusFile}' exists, but is not readable. Please seek professional help."
+      read ok\?"Press <Enter> to continue. "
+    fi
+  else
+    warning "Missing status file '${statusFile}'. Maybe RDFetch has not been run yet?"
+    read ok\?"Press <Enter> to continue. "
+  fi
+
+  trap -
+}
+
+# Gather and display all the rdimport.log files we can find.
+showRDimportLogs() {
+  local myName=${1} ; shift
+  local verbose=${1}
+
+  local returnValue=0
+  local -a logFiles
+
+  trap 'trap - ; return ;' 0 1 2 3
+
+  # Ignore recommendations to use "`mapfile` or `read -a`"
+  # when setting array variable
+  # shellcheck disable=SC2207
+  logFiles=( $(${FIND} ${DIR_LIBRARY} -name rdimport.log -print | ${SORT}) )
+  if [[ -n "${logFiles[*]}" ]] ; then
+    for logfile in ${logFiles[*]} ; do
+      if zstat -H logfileStat ${logfile} ; then
+	fileTime=$(strftime "%A, %B %d, %Y at %T" ${logfileStat[mtime]})
+      else
+	fileTime=$(strftime "%A, %B %d, %Y at %T (unable to stat ${logfile})" ${EPOCHSECONDS})
+      fi
+      titleText="${logfile} as of ${fileTime}"
+      # Center the title on the display.
+      reportTitle="$(printf ' %.0s' {1..$(( (terminfo[cols] - ${#titleText} ) / 2))})${BOLD}${titleText}${NORM}"
+      { printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print; }
+      print "${reportTitle}"
+      { printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print; }
+
+      # The data (and make it pretty, please).
+      if (( logfileStat[size] )) ; then
+	${SED} -r \
+	       -e "s/^(..-..-.... - ..:..:..)/${BOLD}\1${NORM}/" \
+	       -e "s/(error|skipping)/${BOLD}${RED}\1${NORM}/gi" \
+	       < ${logfile}
+      else
+	echo "\n\t'${logfile}' is ${BOLD}${RED}EMPTY${NORM}.\n"
+      fi
+
+      # The footer.
+      { printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print; }
+    done | ${LESS} -RCiP "Viewing rdimport logs?e (End of Output).\. <q> to quit, <PgDown> and <PgUP> to scroll, <g> to -Beginning-, <G> to -End-\."
+  else
+    warning "Could not find ANY log files in '${DIR_LIBRARY}' named 'rdimport.log'."
+    read ok\?"Press <Enter> to continue. "
+    returnValue=1
+  fi
+
+  trap -
+  return "${returnValue}"
+}
+
+# Zero out (delete the contents of) the specified rdimport log file.
+clearRDimportLog() {
+  local myName=${1} ; shift
+  local verbose=${1}
+
+  local returnValue=0
+  local -a logFiles
+  local logfileIndex chosenFile
+
+  trap 'trap - ; return ;' 0 1 2 3
+
+  # Ignore recommendations to use "`mapfile` or `read -a`"
+  # when setting array variable
+  # shellcheck disable=SC2207
+  logFiles=( $(${FIND} ${DIR_LIBRARY} -name rdimport.log -size +1 -printf '%p:%s\n' | ${SORT}) )
+
+  if [[ -n "${logFiles[*]}" ]] ; then
+    echo "\nHere are all the rdimport log files I could find in '${DIR_LIBRARY}':"
+    ${FMT} <<<${logFiles[*]} | ${SED} -r -e 's,^(.*/rdimport.log):([[:digit:]]+)$,(\2 bytes)  \1,' | ${NL}
+
+    read logfileIndex\?"Type the number of the log file you want to clear and press <Enter>: "
+    until (( logfileIndex )) ; do
+      warning "You need to type a number between 1 and ${#logFiles}."
+      read logfileIndex\?"Please type the number of the log file you want to clear and press <Enter>: "
+    done
+
+    chosenFile=${logFiles[${logfileIndex}]%:*}
+    if [[ -w ${chosenFile} ]] ; then
+      if read -q proceed\?"About to clear '${chosenFile}'. Press 'y' to continue, any other key to cancel " ; then
+	if ${CP} /dev/null ${chosenFile} ; then
+	  echo "\nCleared ${chosenFile}. "
+	else
+	  warning "Hmmmm... I encountered an error while trying to clear '${chosenFile}' (${?}). Please pass this number and message on to a professional."
+	  returnValue=2
+	fi
+      else
+	echo "\nDid NOT clear '${chosenFile}'. \c"
+      fi
+    else
+      warning "No permission to clear '${chosenFile}'. Please contact the authorities."
+      returnValue=1
+    fi
+  else
+    warning "Found NO rdimport log files containing data in '${DIR_LIBRARY}'."
+  fi
+
+  read proceed\?"Press <Enter> to continue. "
+
+  trap -
+  return "${returnValue}"
+}
+
+editSchedule() {
+  local myName=${1} ; shift
+  local verbose=${1}
+
+  local minute oMinute hour oHour crontab ok
+
+  trap 'trap - ; return ;' 0 1 2 3
+
+  # Snag the current crontab for later processing.
+  # The variable CRONTAB actually *is* assigned.
+  # shellcheck disable=SC2153
+  crontab=$(${CRONTAB} -l)
+
+  # Give them the opportunity to change the existing schedule.
+  if ${GREP} -q 'podget-wrapper' <<<"${crontab:-X}" ; then
+
+    ${FMT} <<EOF
+
+The current schedule for downloading podcasts is as follows. This is the entire crontab entry. '${BOLD}pmw-podget-wraper${NORM}' is the tool used to launch and track '${BOLD}podget${NORM}', the ${myName} downloader app.
+
+${BOLD}$(${GREP} 'podget-wrapper' <<<${crontab})${NORM}
+
+EOF
+
+    if ! getYesNo "Do you want to change the schedule?" ; then
+
+      echo "\nLeaving the download schedule as it is."
+      read ok\?"Press <Enter> to continue. "
+      trap -
+      return
+
+    fi
+
+    # Pre-fill the vailues we will later prompt for.
+    minute=$(${AWK} '/^[^#].*podget-wrapper/{print $1}' <<<${crontab})
+    hour=$(${AWK} '/^[^#].*podget-wrapper/{print $2}' <<<${crontab})
+
+  fi
+
+  ${FMT} <<EOF
+
+
+${(C)myName} runs the 'podget-wrapper' back-end periodically in order to check for new episodes of podcasts. I check all podcasts each time, downloading new episodes for each podcast as they appear.
+
+Typically, 'podget-wrapper' runs from the system job scheduler at least once an hour every day. I'll assume you want to do that. You will need to update the cron job manually (using the 'crontab' command) only if you want a different schedule.
+
+Valid hours are 0 - 23 and '*' (every hour).
+
+EOF
+
+  unset ok
+  until [[ "${ok}" =~ y ]] ; do
+
+    oHour=${hour}
+    read hour\?"Type the hour(s) you want ${myName} to check for new podcasts (enter '*' for every hour): ${hour:+[${hour}] }"
+    [[ -z "${hour}" ]] && hour=${oHour}
+    until [[ "${hour}" = '*' ]] || [[ "${hour}" =~ [[:digit:],]+ ]] ; do
+
+      echo "You need to enter either an asterisk ('*'), or some combination of hour numbers and commas."
+      read hour\?"Type the hour(s) you want ${myName} to check for new podcasts (enter '*' for every hour): "
+
+    done
+
+    ${FMT} <<EOF
+
+Now I need to know how many times an hour you want to check for new podcasts. You can enter a single "minute" representing once an hour, or you can enter multiple minutes separated with commas (','). Valid minutes are 0 - 59.
+
+EOF
+
+    oMinute=${minute}
+    read minute\?"Enter the minute(s) of the hour(s) ('${hour}') you want to check for podcasts: ${minute:+[${minute}] }"
+    [[ -z "${minute}" ]] && minute=${oMinute}
+    # Note: we explicitely DO NOT permit 'every minute' here.
+    until [[ "${minute}" =~ ^[[:digit:],]+$ ]] ; do
+
+      echo "You need to enter combination of minute numbers and commas."
+      read minute\?"Type the minute(s) of the hour(s) ('${hour}') you want to check for podcasts: "
+
+    done
+
+    echo "Using 'hour: ${hour}' and 'minute: ${minute}' for the podcast download schedule."
+
+    if getYesNo "Press 'y' to commit this schedule, or 'n' to cancel" ; then
+      echo "Canceling this schedule change. Please try your call again later."
+      read ok\?"Press <Enter> to continue. "
+      trap -
+      return
+    fi
+
+    ok=y
+
+  done
+
+  (
+    ${GREP} -v 'podget-wrapper' <<<${crontab}
+    echo "${minute} ${hour} * * * zsh /usr/local/bin/podget-wrapper"
+  ) | ${CRONTAB} -
+
+  ${CAT} <<EOF
+
+
+Here is the complete cron entry for downloading podcasts:
+
+$(${CRONTAB} -l | ${GREP} --perl-regexp '^(#|.*podget-wrapper)')
+
+EOF
+
+  read ok\?"Press <Enter> to continue. "
+
+  trap -
+}
+
+editFile() {
+  local myName=${1} ; shift
+  local filename=${1} ; shift
+  local verbose=${1}
+
+  trap 'trap - ; return ;' 0 1 2 3
+
+  ${VISUAL:-${EDITOR:-nano}} ${filename}
+
+  trap -
+}
+
+cronEdit() {
+  local myName=${1} ; shift
+  local verbose=${1}
+
+  trap 'trap - ; return ;' 0 1 2 3
+
+  ((verbose)) && echo "${myName}: directly editing crontab."
+
+  EDITOR=${VISUAL:-${EDITOR:-nano}} ${CRONTAB} -e
+
+  trap -
+  return
+}
+
+addRDDropbox() {
+  local myName=${1} ; shift
+  local dirLibrary=${1} ; shift
+  local feedName=${1} ; shift
+  local feedGroup=${1} ; shift
+  local verbose=${1}
+
+  local createANewDropbox=0
+  local returnValue=1
+  local desiredNumber dropboxCartNumber
+
+  if ! okDatabaseStructure DROPBOXES:id+path+to_cart+group_name "${verbose}" ; then
+    returnValue="${?}"
+    error "${0}() (${zsh_eval_context}): This version of ${myName} is not compatible with Rivendell database version $(rdDatabaseVersion). You need to create a dropbox manually."
+    read ok\?"Press <Enter> to continue. "
+    return "${returnValue}"
+  fi
+
+  ##########################################################################################
+  ## See whether there is a dropbox with a matching pathname.
+  ##########################################################################################
+  query="select d.ID,d.PATH,d.TO_CART,d.GROUP_NAME from DROPBOXES d where d.PATH like '${DIR_LIBRARY}/${feedGroup}/${feedName}/%'"
+  # ShellCheck is just too aggressive on its quoting suggestions.
+  # shellcheck disable=SC2046
+  read dropboxID dropboxPATH dropboxCARTNUM dropboxGROUP <<<$(doSQL "${query}")
+  if (( dropboxID )) ; then
+    # We *want* the quotes to be treated literally.
+    # shellcheck disable=SC2089
+    info="It appears as if Rivendell dropbox '${dropboxID}' watches for files at '${dropboxPATH}'."
+
+    if (( dropboxCARTNUM )) ; then
+
+      query="select TITLE from CART where NUMBER = ${dropboxCARTNUM}"
+      # Keep shellcheck quiet about its quoting recommendation.
+      # shellcheck disable=SC2046
+      read cartTITLE <<<$(doSQL "${query}")
+
+      info="${info} The dropbox uses the CART '${cartTITLE}' (number ${dropboxCARTNUM})."
+      # ShellCheck thinks quotes will not be respected in ${info}, but
+      # we know better.
+      # shellcheck disable=SC2090
+      ${FMT} <<<${info}
+
+    else
+
+      info="${info} This dropbox assigns new carts in group '${dropboxGROUP}'."
+
+      # See above.
+      # shellcheck disable=SC2090
+      ${FMT} <<<${info}
+
+    fi
+
+    if getYesNo "Do you want to use this dropbox for the feed '${feedName}'?" ; then
+
+      echo "OK, using existing dropbox."
+      returnValue=0
+
+    else
+      createANewDropbox=1
+    fi
+  else
+    createANewDropbox=1
+  fi
+
+  ##########################################################################################
+  ## Create a new Rivendell dropbox
+  ##########################################################################################
+  if (( createANewDropbox )) ; then
+
+    echo
+    if getYesNo "Would you like to set up a Rivendell dropbox for '${feedName}'?" ; then
+
+      # Offer to use an existing cart if it exists and has the same
+      # title as this feed.
+      existingCartNumber=$(rdCartNumberFromTitle "${feedName}" ${verbose})
+      if [[ -n "${existingCartNumber}" ]] ; then
+	if getYesNo "CART number '${existingCartNumber}' has the title '${feedName}'. Do you want to use this CART?" ; then
+	  dropboxCartNumber=${existingCartNumber}
+
+	fi
+      elif getYesNo "Create a new CART and assign each '${feedName}' episode to it (one CART for all episodes)?" ; then
+	dropboxCartNumber=$(rdCreateEmptyCart ${feedGroup} ${feedName})
+      else
+	if getYesNo "OK, do you want each '${feedName}' episode to be placed into its own (new) CART?" ; then
+	  dropboxCartNumber=0
+	else
+	  if getYesNo "OK, do you want to choose an existing CART number for episodes of '${feedName}'?" ; then
+	    unset dropboxCartGroup cartTitle
+	    until [[ "${feedGroup}" = "${dropboxCartGroup}" ]] ; do
+	      until [[ -n "${cartTitle}" ]] ; do
+		echo
+		read desiredNumber\?"Enter an existing CART number from group '${feedGroup}' to assign to this podcast feed: "
+		until [[ ${desiredNumber//[.,]/} =~ ^[[:digit:]]{1,6}$ ]] ; do
+		  read desiredNumber\?"Sorry, the CART number must be a number between 1 and 999999.
+Enter an existing CART number to assign to this podcast feed: "
+		done
+
+		cartTitle=$(rdCartTitleFromNumber ${desiredNumber//[.,]/} ${verbose})
+		if [[ -z "${cartTitle}" ]] ; then
+		  warning "There is no title for CART number '${desiredNumber//,/}'. Please try again."
+		fi
+
+	      done
+
+	      dropboxCartNumber=${desiredNumber//[.,]/}
+	      dropboxCartGroup=$(rdCartGroupFromNumber ${dropboxCartNumber} ${verbose})
+
+	      if [[ "${feedGroup}" != "${dropboxCartGroup}" ]] ; then
+		warning "CART '${dropboxCartNumber}' ('${cartTitle}') is in GROUP '${dropboxCartGroup}' and you specified GROUP '${feedGroup}' for this feed. Please choose a CART from the GROUP '${feedGroup}'."
+		unset cartTitle desiredNumber dropboxCartNumber dropboxCartGroup
+	      else
+		read answer\?"OK. Using CART '${dropboxCartNumber}' ('${cartTitle}') for this feed. Press <Enter> to continue. "
+	      fi
+
+	    done
+	  else
+
+	    warning "Well, you're not assigning a specific cart to this podcast, and you're not using a new cart for each episode. You're on your own."
+
+	  fi
+	fi
+      fi
+
+      ##########################################################################################
+      ## Actually create the new dropbox.
+      ##########################################################################################
+      if [[ -n "${dropboxCartNumber}" ]] ; then
+	if dropboxID=$(createDropbox ${feedGroup} ${feedName} ${DIR_LIBRARY} ${fileExt} ${dropboxCartNumber} ${verbose}) ; then
+	  echo "Dropbox number ${dropboxID} created."
+	  returnValue=0
+	else
+	  warning "Error creating dropbox for feed '${feedName}'. Please notify the authorities!"
+	fi
+      fi
+    else
+
+      echo
+      echo "\nOK, you may want to add a Rivendell dropbox on your own so that the podcast episodes get imported."
+
+    fi
+  fi
+
+  return "${returnValue}"
+}
+
+showRDDropboxes() {
+  local myName=${1} ; shift
+  local verbose=${1}
+
+  local query="select d.ID,d.STATION_NAME,d.PATH,d.GROUP_NAME,d.TO_CART,d.DELETE_CUTS,c.TITLE,u.ORIGIN_DATETIME from DROPBOXES d join CART c on d.TO_CART = c.NUMBER join CUTS u on c.NUMBER = u.CART_NUMBER where d.PATH like '${DIR_LIBRARY}/%' order by d.PATH"
+  local id stationName boxpath group cart dropcuts title origin_datetime
+
+  if ! okDatabaseStructure DROPBOXES:id+station_name+path+group_name+to_cart+delete_cuts,CART:number+title,CUTS:cart_number+origin_datetime "${verbose}" ; then
+    returnValue="${?}"
+    error "${0}() (${zsh_eval_context}): This version of ${myName} is not compatible with Rivendell database version $(rdDatabaseVersion). You need to create a dropbox manually."
+    read ok\?"Press <Enter> to continue. "
+    return "${returnValue}"
+  fi
+
+  trap 'trap - 0 1 2 3 ; return ;' 0 1 2 3
+
+  # Find the longest dropbox pathname and the longest Cart title so we
+  # can set the column widths.
+  local -i maxPathLength=22 maxTitleLength=32
+  maxPathLength=$(doSQL "select max(length(PATH)) from DROPBOXES")
+  maxTitleLength=$(doSQL "select max(length(c.TITLE)) from DROPBOXES d join CART c on d.TO_CART = c.NUMBER where d.PATH like '${DIR_LIBRARY}/%'")
+
+  (
+    IFS='	'
+    # The header (centered on the output device).
+    reportTitleText="RDFetch-related (not all) Rivendell Dropboxes"
+    reportTitle="$(printf ' %.0s' {1..$(( (terminfo[cols] - ${#reportTitleText} ) / 2))})${BOLD}${reportTitleText}${NORM}"
+    { printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print; }
+    print "${reportTitle}"
+    { printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print; }
+    printf "%3s %12s %-${maxPathLength}s %-12s %6s %4s %-${maxTitleLength}s %-19s\\n"  "ID" "Hostname  " "Dropbox Path Spec" "Group" "CART #" "Drop" "Title" "Last Imported"
+    { printf '-%.0s' {1..$((4+13+maxPathLength+13+7+5+maxTitleLength+20))}; print; }
+
+    # The data.
+    doSQL "${query}" | while read id stationName boxpath group cart dropcuts title origin_datetime ; do
+
+      if (( cart == 0 )) ; then
+	title='** New cart for each episode **'
+      fi
+
+      printf "%3d %12s %-${maxPathLength}s %-12s %06d %3s  %-${maxTitleLength}s %-19s\\n" ${id} ${stationName} ${boxpath} ${group} ${cart} ${dropcuts} "${title}" "${origin_datetime}"
+
+    done
+
+    # The footer.
+    { printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print; }
+
+  ) | ${LESS} -RCiP "Viewing Rivendell Dropboxes for RDFetch?e (End of Output).\. Press <q> to quit, <PgDown> and <PgUP> to scroll, <g> to -Beginning-, <G> to -End-\."
+
+  trap -
+  return
+}
+
+showDropboxStatus() {
+  local myName=${1} ; shift
+  local verbose=${1}
+
+  local ok
+
+  # Second arg indicates we are calling rdDropboxStatus interactively.
+  rdDropboxStatus ${myName} 1 ${verbose}
+
+  echo
+  read ok\?"Press <Enter> to continue. "
+  return
+}
+
+# Delete a Rivendell dropbox.
+# This is called from inside a trap() handler, so no additional handling required.
+deleteRDDropbox() {
+  local myName=${1} ; shift
+  local pathPrefix=${1} ; shift
+  local verbose=${1}
+
+  local returnValue=0
+
+  if ! okDatabaseStructure DROPBOXES:id+path+to_cart "${verbose}" ; then
+    returnValue="${?}"
+    error "${0}() (${zsh_eval_context}): This version of ${myName} is not compatible with Rivendell database version $(rdDatabaseVersion). You need to delete the dropbox manually."
+    read ok\?"Press <Enter> to continue. "
+    return "${returnValue}"
+  fi
+
+  query="select ID,PATH,TO_CART from DROPBOXES where PATH like '${pathPrefix}%'"
+  # shellcheck disable=SC2046
+  read id boxpath cart <<<$(doSQL "${query}")
+  if (( cart )) ; then
+    cartText="and imports the audio into CART ${cart}"
+  else
+    cartText="and creates a new cart for each episode"
+  fi
+
+  ${FMT} <<EOF
+
+About to delete the Rivendell dropbox ID '${id}' which watches for files at '${boxpath}', ${cartText}.
+
+EOF
+
+  if getYesNo "Press 'y' to proceed, or 'n' to cancel" ; then
+
+    query="delete from DROPBOXES where ID = ${id}"
+    doSQL "${query}"
+
+    query="select ID from DROPBOXES where ID = ${id}"
+    result=$(doSQL "${query}")
+    if [[ -z "${result}" ]] ; then
+
+      echo "\nDropbox '${id}' successfully deleted"
+
+    else
+
+      echo "\nHmmmm... That dropbox (ID '${id}') is still in the Rivendell database. You should figure out what's going on."
+      returnValue=1
+
+    fi
+
+    if getYesNo "Do you also want to delete CART '${cart}' and its audio?" ; then
+
+      if message=$(rdDropCart ${cart} ${verbose}) ; then
+	echo "\nSuccessfully deleted CART '${cart}'."
+      else
+	warning "Unable to delete CART '${cart}' (${message})"
+      fi
+
+    else
+
+      warning "OK. But you may want consider deleting CART '${cart}'."
+
+    fi
+
+  else
+
+    warning "Alright, but you will need to delete that dropbox yourself if you are done with it."
+
+  fi
+
+  return "${returnValue}"
+}
+
+# Stop any running instance of rdimport, and remove the dropbox directory.
+# This is called from inside a trap() handler, so no additional handling required.
+cleanupFeed() {
+  local myName=${1} ; shift
+  local group=${1} ; shift
+  local feedName=${1} ; shift
+  local verbose=${1}
+
+  local pathPrefix=${DIR_LIBRARY}/${group}/${feedName}
+  local id
+  local returnValue=0
+
+  (( verbose )) && warning "${myName} (verbose): pathPrefix is '${pathPrefix}'."
+
+  if id=$(rdGetDropboxIDFromPath ${myName} ${pathPrefix} 1 ${verbose:-0}) ; then
+
+    # There might not be a running instance of rdimport for this
+    # dropbox, especially if there is a problem with the dropbox.
+    rdimportPID=$(for PID in $(${PIDOF} rdimport) ; do
+		    ${GREP} -q --text "persistent-dropbox-id=${id}" /proc/${PID}/cmdline &&
+		      { echo ${PID} ; break ; }
+		  done)
+    if [[ -n "${rdimportPID}" ]] ; then
+
+      if ! kill ${rdimportPID} ; then
+	warning "Unable to stop process '${rdimportPID}'."
+      fi
+
+    fi
+
+    # Remove the dropbox directory.
+    if [[ -d ${pathPrefix} ]] ; then
+
+      ${RM} -rf ${pathPrefix}
+
+    else
+
+      warning "Dropbox path '${pathPrefix}' is not a directory. Please seek professional help."
+      returnValue=2
+
+    fi
+
+  else
+
+    warning "ID returned from rdGetDropboxIDFromPath() was '${id}' for path '${pathPrefix}'."
+    returnValue=1
+
+  fi
+
+  return "${returnValue}"
+}
+
+makeParser() {
+  local selection=${1:?"Need an XML selection."}
+  local tmpfile
+
+  tmpfile=$(${MKTEMP}) || { echo '' ; return 2 ; }
+  
+  ${CAT} > ${tmpfile} <<EOF
+<?xml version="1.0"?>
+<stylesheet version="1.0"
+	xmlns="http://www.w3.org/1999/XSL/Transform">
+	<output method="text"/>
+	<template match="/">
+		<apply-templates select="${selection}"/>
+	</template>
+	<template match="enclosure">
+		<value-of select="@url"/><text>&#10;</text>
+	</template>
+</stylesheet>
+EOF
+
+  echo ${tmpfile}
+}
+
+createDropbox() {
+  local feedGroup=${1:?"Need a Rivendell GROUP to assign to this dropbox."} ; shift
+  local feedName=${1:?"Need a podcast feed name for this dropbox."} ; shift
+  local dirLibrary=${1:?"Need a DIR_LIBRARY for this dropbox."} ; shift
+  local fileExt=${1:?"Need a file extension (type) for this dropbox."} ; shift
+  local cartNumber=${1:?"Need a CART number for this dropbox."} ; shift
+  local verbose=${1}
+
+  local dropboxPath="${dirLibrary}/${feedGroup}/${feedName}"
+  local returnValue=0
+  local deleteCuts=n
+  local stationName dropboxID
+  local -a query
+
+  if ! okDatabaseStructure DROPBOXES:station_name+group_name+path+normalization_level+autotrim_level+to_cart+delete_cuts+fix_broken_formats+log_path "${verbose}" ; then
+    echo "${0}() (${zsh_eval_context}): This version of ${0} is not compatible with Rivendell database version '$(rdDatabaseVersion)'."
+    read ok\?"Press <Enter> to continue. "
+    return 128
+  fi
+
+  ## DELETE_CUTS is set to "N" in the database only if they press 'y'
+  ## in response to this prompt.
+  echo >&2
+  if getYesNo "Do you want to delete old cuts before importing new audio for this dropbox?" ; then
+    # Well, it *is* used, but in a non-Bash sort of way, see the query.
+    # shellcheck disable=SC2034
+    deleteCuts=y
+  fi
+
+  if stationName=$(rdGetStationName) ; then
+
+    ## This shell array variable gets turned into a single string below.
+    query=(
+      "insert into DROPBOXES"
+      "(STATION_NAME, GROUP_NAME, PATH, NORMALIZATION_LEVEL, AUTOTRIM_LEVEL, TO_CART, DELETE_CUTS, FIX_BROKEN_FORMATS, LOG_PATH)"
+      "values"
+      "('${stationName}', '${feedGroup}', '${dropboxPath}/*.${fileExt}', -100, -5000, ${cartNumber}, '${(U)deleteCuts}', 'Y', '${dropboxPath}/rdimport.log')"
+    )
+
+    if doSQL "${(j: :)query}" ; then
+
+      # Make sure we created the new dropbox
+      dropboxID=$(doSQL "select ID from DROPBOXES where PATH = '${dropboxPath}/*.${fileExt}'")
+
+      if [[ -z "${dropboxID}" ]] ; then
+
+	warning "Unable to discern the new dropbox ID. Did the dropbox get created?"
+	returnValue=1
+
+      else
+	echo ${dropboxID}
+      fi
+
+    else
+
+      warning "Attempt to create new dropbox failed (${?}). Please seek professional advice."
+      returnValue=1
+
+    fi
+
+  else
+
+    returnValue=2
+
+  fi
+
+  return "${returnValue}"
+}
+
+# Return 0 ("success") for a "yes"-like response and 1 ("non-success")
+# for a "no"-like response to the given prompt.
+getYesNo() {
+  local prompt="${1}"
+
+  local response=''
+  until [[ "${(L)response}" =~ ^(no*|y(es)*)$ ]] ; do
+    echo "${prompt} [y or n] \c" > /dev/tty
+    # response is actually used, but in a non-Bash way, see below.
+    # shellcheck disable=SC2034
+    read response < /dev/tty
+  done
+  [[ "${(L)response}" =~ n ]] && return 1
+  return 0
+}
+
+warning() {
+  local message=${1}
+
+  ${CAT} >&2 <<EOF
+
+${BOLD}${YELLOW}WARNING:${NORM}
+$(${FMT} -w 79 <<< ${message})
+
+EOF
+}
+
+error() {
+  local message=${1}
+
+  ${CAT} >&2 <<EOF
+
+${RED}${BOLD}ERROR:${NORM}
+$(${FMT} -w 79 <<< ${message})
+
+EOF
+  echo 254
+  return 254
+}
+
+##########################################################################################
+## Script main line
+##########################################################################################
+
+############# BEGIN external shell commands used in this script. #############
+# This script uses these 24 external commands.
+# Look for them in their upper case, parameter expanded form.
+typeset -a our_commands
+our_commands=( awk cat chmod column cp crontab diff find fmt getopt grep less mkdir mktemp mv nl pidof podget rm sed sort wc wget xsltproc )
+# Find the executables we need; this uses some basic shell and a ZSH trick:
+# the (U) in the eval says to evaluate the parameter as all upper case
+# letters. This snippet generates shell parameters representing the upper case
+# equivalent of the command names and sets the parameter values to the full path
+# of the commands.
+# Refresh this segment in Emacs by marking the appropriate region (or the whole
+# buffer with C-xH) and replacing it with C-uM-|mk-ourCommands (shell-command-on-region).
+for C in ${our_commands[*]} ; do
+  for D in ${path} ; do
+    # shellcheck disable=SC2140,SC2086 # we need the quotes
+    [[ -x "${D}/${C}" ]] && { eval "${(U)C//-/_}"="${D}/${C}" ; break ; }
+  done
+  # shellcheck disable=SC2086 # we need the quotes
+  [[ -x $(eval print \$${(U)C//-/_}) ]] || { print "Cannot find ${C}! Done."; return 1 ; }
+done
+unset our_commands
+############## END external shell commands used in this script. ##############
+
+# Set some defaults, and see below for more ways to set these.
+DIR_CONFIG=@PODGET_DIR_CONFIG@
+CONFIG_CORE=podgetrc
+CONFIG_NOTIFY=notifyrc
+VERBOSE=0
+
+if ! TEMP=$(${GETOPT} -o c:d:Vvh --long config:,dir-config:,version,verbose,help -n "${0##*/}" -- "${@}") ; then
+  echo "getopt(1) Fatal Error (${?}). Terminating..." >&2
+  return 1
+fi
+eval set -- "${TEMP}"
+while : ; do
+  # VERBOSE is used, but in a non-Bash way.
+  # shellcheck disable=SC2034
+  case "${1}" in
+    -c|--conf*) CONFIG_CORE=${2} ; shift 2 ;;
+    -d|--dir-*) DIR_CONFIG=${2} ; shift 2 ;;
+    -h|--help*) usage ${0##*/} ; exit ;;
+    -v|--verb*) VERBOSE=1 ; shift ;;
+    -V|--vers*) showVersion=1 ; shift ;;
+    --) shift ; break ;;
+    *) echo "${0##*/}: getopt internal error!. Terminating..." >&2 ; return 1 ;;
+  esac
+done
+
+if ((showVersion)) ; then
+  echo "${0##*/}: version ${vMajor}.${vMinor}.${vPatch}-${${vHash#\$Hash: }%$}"
+  exit 0
+fi
+
+RED="${fg_bold[red]}"
+YELLOW="${fg_bold[yellow]}"
+BOLD="${bold_color}"
+NORM="${reset_color}"
+# Hard code this for now.
+fileExt=mp3
+
+# Ensure the configuration directory exists.
+if [[ ! -d ${DIR_CONFIG} ]] ; then
+  if ! ${MKDIR} -p ${DIR_CONFIG} ; then
+    exit "$(error 'Unable to create configuration directory ${DIR_CONFIG}. Make sure your permissions are set so that you have file create and write rights to the ${DIR_CONFIG} directory. Cannot continue.')"
+
+  fi
+fi
+
+# Run podget(1) if it appears it has never been run.
+failCount=1
+maxAttempts=10
+until [[ -r ${DIR_CONFIG}/${CONFIG_CORE} ]] ; do
+
+  warning "Unable to read configuration file ${DIR_CONFIG}/${CONFIG_CORE}. Running podget to create a new configuration..."
+
+  ${PODGET} --dir_config ${DIR_CONFIG}
+
+  ((failCount++ > maxAttempts )) &&
+    exit "$(error 'Unable to create ${DIR_CONFIG}/${CONFIG_CORE} ${maxAttempts} times. I quit.')"
+
+done
+
+# shellcheck disable=SC1090
+[[ -r ${DIR_CONFIG}/${CONFIG_CORE} ]] && source "${DIR_CONFIG}/${CONFIG_CORE}"
+[[ -n "${CONFIG_SERVERLIST}" ]] ||
+  exit "$(error 'Failed to get a setting for CONFIG_SERVERLIST. Does ${DIR_CONFIG}/${CONFIG_CORE} exist?')"
+
+##########################################################################################
+## The guts of why we are here.
+##########################################################################################
+
+typeset -a menu command
+typeset -R 2 count
+
+while : ; do
+  count=0
+
+  ## Source the podget-wrapper notification configuration. We do this
+  ## on each menu iteration in case the user changed it.
+  if [[ -r "${DIR_CONFIG}/${CONFIG_NOTIFY}" ]] ; then
+    # Ignore the non-constant source: this is resolved at runtime.
+    # shellcheck disable=SC1090
+    source "${DIR_CONFIG}/${CONFIG_NOTIFY}"
+  fi
+
+  menu=(
+    "Quit"
+    "Add or Replace a podcast feed"
+    "Delete or disable a podcast feed"
+    "Enable a disabled podcast feed"
+    "Show the complete list of podcast feeds"
+    "Show most recent podget run status"
+    "Show most recent podget diagnostic status"
+    "Show rdimport log files"
+    "Clear one rdimport log file"
+    "View and set the podget run schedule \(crontab\)"
+    "Show Rivendell dropboxes"
+    "Show Rivendell dropbox status"
+    "\[Advanced\] Edit the podcast list with \'${EDITOR:-${VISUAL:-nano}}\'"
+    "\[Advanced\] Edit the notification configuration with \'${EDITOR:-${VISUAL:-nano}}\'"
+    "\[Advanced\] Edit the mailer configuration with \'${EDITOR:-${VISUAL:-nano}}\'"
+    "\[Advanced\] Edit ${USER}\'s crontab file with \'${EDITOR:-${VISUAL:-nano}}\'"
+  )
+  command=(
+    'addOrReplaceFeed ${0##*/} ${VERBOSE}'
+    'deleteFeed ${0##*/} ${VERBOSE}'
+    'enableFeed ${0##*/} ${VERBOSE}'
+    'showFeeds ${0##*/} ${VERBOSE}'
+    'showLastStatus ${0##*/} out ${VERBOSE}'
+    'showLastStatus ${0##*/} err ${VERBOSE}'
+    'showRDimportLogs ${0##*/} ${VERBOSE}'
+    'clearRDimportLog ${0##*/} ${VERBOSE}'
+    'editSchedule ${0##*/} ${VERBOSE}'
+    'showRDDropboxes ${0##*/} ${VERBOSE}'
+    'showDropboxStatus ${0##*/} ${VERBOSE}'
+    'editFile ${0##*/} ${DIR_CONFIG}/${CONFIG_SERVERLIST} ${VERBOSE}'
+    'editFile ${0##*/} ${DIR_CONFIG}/${CONFIG_NOTIFY} ${VERBOSE}'
+    'editFile ${0##*/} ${PODGET_MAILER_CONFIG} ${VERBOSE}'
+    'cronEdit ${0##*/} ${VERBOSE}'
+  )
+  windowTitle=(
+    "Add Feed"
+    "Delete Feed"
+    "Enable Feed"
+    "List Feeds"
+    "podget Run Status"
+    "podget Diagnostic Status"
+    "Viewing rdimport Logs"
+    "Clearing rdimport Log"
+    "Edit run Schedule"
+    "Rivendell Dropboxes"
+    "Rivendell Dropbox Status"
+    "Edit serverlist"
+    "Edit notifyrc"
+    "Edit mailer configuration"
+    "Edit crontab"
+  )
+
+  # Set the window title.
+  printf '\033]0;%s\007' RDFetch
+
+  for menuItem in ${menu[*]} ; do
+    echo "${count}) $(eval echo ${menuItem})"
+    (( count++ ))
+  done
+  echo
+
+  read choice\?"Type your choice and press <Enter>: "
+
+  echo
+
+  if [[ -z "${choice}" ]] ; then
+    echo "Please enter a number between 0 and $(( count - 1 ))."
+    read ok\?"Press <Enter> to continue. "
+
+  elif [[ ${choice} =~ ^[0Qq]$ ]] ; then
+    printf '\033]0;%s\007' ''
+    exit
+
+  elif [[ "${choice}" =~ [[:space:]]*[[:alpha:]]+ ]] ; then
+    echo "'${choice}' is not an option. Please enter a number between 0 and $(( count - 1 ))."
+    read ok\?"Press <Enter> to continue. "
+
+  elif [[ "${choice}" =~ [[:space:]]*[[:alnum:]]+[[:space:]]+ ]] ; then
+    echo "'${choice}' is not an option (watch your spaces). Please enter a number between 0 and $(( count - 1 ))."
+    read ok\?"Press <Enter> to continue. "
+
+  elif (( choice > 0 && choice < count )) ; then
+
+    # Set the window title for this menu choice then run the command.
+    printf '\033]0;%s\007' ${windowTitle[${choice}]}
+    # eval() needs the use of echo() to work properly here
+    # shellcheck disable=SC2046,SC2116
+    eval $(echo ${command[${choice}]})
+
+  else
+    echo "'${choice}' is not an option. Please enter a number between 0 and $(( count - 1 ))."
+    read ok\?"Press <Enter> to continue. "
+
+  fi
+
+  # As found in ZSH module zsh/terminfo.
+  echoti clear
+done
+
+exit
+
+# Local Variables: ***
+# mode:shell-script ***
+# indent-tabs-mode: f ***
+# sh-indentation: 2 ***
+# sh-basic-offset: 2 ***
+# sh-indent-for-do: 0 ***
+# sh-indent-after-do: + ***
+# sh-indent-comment: t ***
+# sh-indent-after-case: + ***
+# sh-indent-after-done: 0 ***
+# sh-indent-after-else: + ***
+# sh-indent-after-if: + ***
+# sh-indent-after-loop-construct: + ***
+# sh-indent-after-open: + ***
+# sh-indent-after-switch: + ***
+# sh-indent-for-case-alt: ++ ***
+# sh-indent-for-case-label: + ***
+# sh-indent-for-continuation: + ***
+# sh-indent-for-done: 0 ***
+# sh-indent-for-else: 0 ***
+# sh-indent-for-fi: 0 ***
+# sh-indent-for-then: 0 ***
+# End: ***

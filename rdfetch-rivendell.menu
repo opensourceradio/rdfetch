@@ -1,0 +1,17 @@
+ <!DOCTYPE Menu PUBLIC "-//freedesktop//DTD Menu 1.0//EN"
+  "http://www.freedesktop.org/standards/menu-spec/1.0/menu.dtd">
+
+<Menu>
+<Name>Applications</Name>
+<Menu>
+  <Name>Rivendell</Name>
+  <Directory>rivendell-rivendell.directory</Directory>
+  <Menu>
+    <Name>Configuration</Name>
+    <Directory>rivendell-configuration.directory</Directory>
+    <Include>
+      <Filename>rdfetch.desktop</Filename>
+    </Include>
+  </Menu>
+</Menu>
+</Menu>

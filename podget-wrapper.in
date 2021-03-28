@@ -1,0 +1,600 @@
+#!/bin/zsh
+# shellcheck shell=bash disable=SC2154,SC2162
+# Globally ignore shellcheck directives:
+# SC2154 because those variables that are 'referenced but not assigned' actually are assigned.
+# SC2162 because we do not care about backslashes in values read from STDIN.
+
+##########################################################################################
+##########################################################################################
+##
+## podget-wrapper
+##
+## A Broadcast Tool & Die wrapper around podget(1) that does some
+## sooper sofisiticated exception handling for the awesome podget(1)
+## bash script (github.com:dvehrs/podget).
+##
+##   Copyright 2020, David Klann <dklann@broadcasttool.com>
+##
+##   This program is free software; you can redistribute it and/or modify
+##   it under the terms of the GNU General Public License version 3 as
+##   published by the Free Software Foundation.
+##
+##   This program is distributed in the hope that it will be useful,
+##   but WITHOUT ANY WARRANTY; without even the implied warranty of
+##   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+##   GNU General Public License for more details.
+##
+##   You should have received a copy of the GNU General Public
+##   License along with this program; if not, write to the Free Software
+##   Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+##
+##########################################################################################
+##########################################################################################
+
+
+setopt NO_CASE_MATCH FUNCTION_ARGZERO
+zmodload zsh/regex
+zmodload zsh/datetime
+
+myName="${0:t}"
+
+# This script complies with Semantic Versioning: http://semver.org/
+vMajor=0
+vMinor=3
+vPatch=1
+# shellcheck disable=SC2016
+vHash='$Hash$'
+
+# Get zsh functions necessary for this script.
+if [[ -r @bindir@/zsh-functions ]] ; then
+  # shellcheck disable=SC1091
+  source @bindir@/zsh-functions
+else
+  # shellcheck disable=SC2046
+  exit $(error "${myName}" "Could not find support library '/usr/local/bin/zsh-functions'. Cannot continue.") ;
+fi
+
+##############################################################################
+## Locally defined subroutines
+##############################################################################
+
+# How to use this command.
+usage() {
+  local myName=${1}
+
+  ${CAT} <<EOF
+${myName}: run podget with exception handling and notifications
+
+Summary
+
+${myName} [ --verbose (-v) ] [ --version (-V) ]
+                   [ --config (-c) <podget-configuration-file> ]
+                   [ --config_notify (-n) <noification-configuration-file> ]
+                   [ --dir_config (-d) <podget-directory-path> ]
+
+Description
+
+podget-wrapper is a ZSH sript that performs some sanity checking
+before launching podget, then performs cleanup and further sanity
+checking after the podget run completes.
+
+podget-wrapper sends email notification of unexpected events to
+all the addresses listed in the 'PODGET_MAILTO' parameter in the file
+'${DIR_CONFIG}/${CONFIG_NOTIFY}'.
+
+EOF
+}
+
+# Relevant runtime data in a key-value text file.
+# Returns 0 on success, else 1 or other positive integer (see below for possibilities).
+updateRuntimeData() {
+  local myName=${1} ; shift
+  local key=${1:?"Need a key to set or update in ${DIR_LOG}/${PODGET_RUNTIME_DATA}"}
+  local value=${2:?"Need a value for key '${key}' to set or update in ${DIR_LOG}/${PODGET_RUNTIME_DATA}"}
+
+  local tmpfile
+  tmpfile=$(${MKTEMP}) || { error "${myName}: ${0}(): Unable to create temporary file (${?}). Cannot continue." ; exit 2 ; }
+
+  # shellcheck disable=SC2064 # because we *want* the variables to be expanded now.
+  trap "${RM} -f ${tmpfile} ; return ; " 0 1 2 3
+
+  # Make sure the runtime data state file exists.
+  [[ -w "${DIR_LOG}/${PODGET_RUNTIME_DATA}" ]] || ${TOUCH} "${DIR_LOG}/${PODGET_RUNTIME_DATA}"
+
+  # Attempt to delete the key and value.
+  if [[ "${value}" == "DELETE" ]] ; then
+
+    # Grab everything except the line with our key on it (we do not
+    # care if the key is present in the file).
+    ${GREP} -v "^${key} " "${DIR_LOG}/${PODGET_RUNTIME_DATA}" > "${tmpfile}"
+
+    if ! ${MV} "${tmpfile}" "${DIR_LOG}/${PODGET_RUNTIME_DATA}" ; then
+      error "${myName}" "ERROR: Failed to DELETE key '${key}' from '${DIR_LOG}/${PODGET_RUNTIME_DATA}'."
+      trap - 0 1 2 3
+      return 32
+
+    fi
+
+  elif ${GREP} -q "^${key} " "${DIR_LOG}/${PODGET_RUNTIME_DATA}" ; then
+
+    # Found this key, replace the value.
+    ${SED} -i.bak -e "/^${key} /s/^.*/${key} ${value}/" "${DIR_LOG}/${PODGET_RUNTIME_DATA}"
+
+    # There should be exactly one line of difference between the
+    # edited file and the original file (.bak)
+    # We want these variables to be read-only so ignore shellcheck.
+    # The inner variables *are* quoted.
+    # shellcheck disable=SC2155,SC2086
+    local -r diffOutput="$(${DIFF} -y --suppress-common-lines ${DIR_LOG}/${PODGET_RUNTIME_DATA} ${DIR_LOG}/${PODGET_RUNTIME_DATA}.bak)"
+    local -r diffLineCount=$(echo "${diffOuput}" | ${WC} -l)
+
+    ${RM} -f "${DIR_LOG}/${PODGET_RUNTIME_DATA}.bak"
+
+    if (( diffLineCount != 1 )) ; then
+
+      echo "${diffOutput}" > "${tmpfile}"
+      warning "${myName}" "INTERNAL_ERROR: Unexpected change to '${DIR_LOG}/${PODGET_RUNTIME_DATA}' when trying to change key '${key}' to '${value}' (see attached). Aborting podget run."
+      sendNotification "${myName}" "${PODGET_MAILTO}" INTERNAL_ERROR "Unexpected change to '${DIR_LOG}/${PODGET_RUNTIME_DATA}' when trying to change key '${key}' to '${value}' (see attached). Aborting podget run." "${tmpfile}"
+      ${RM} -f "${tmpfile}"
+
+      trap - 0 1 2 3
+      return 34
+
+    fi
+
+  else
+
+    # Add the new key, and keep the runtime data file sorted.
+    (
+      echo "${key} ${value}"
+      ${CAT} "${DIR_LOG}/${PODGET_RUNTIME_DATA}"
+    ) | ${SORT} > "${tmpfile}"
+
+    if ! ${MV} "${tmpfile}" "${DIR_LOG}/${PODGET_RUNTIME_DATA}" ; then
+      warning "${myName}" "INTERNAL_ERROR: Failed to replace '${DIR_LOG}/${PODGET_RUNTIME_DATA}' with temporary file '${tmpfile}'. Aborting podget run."
+      sendNotification "${myName}" "${PODGET_MAILTO}" INTERNAL_ERROR "Failed to replace '${DIR_LOG}/${PODGET_RUNTIME_DATA}' with temporary file '${tmpfile}'. Aborting podget run."
+
+      trap - 0 1 2 3
+      return 36
+
+    fi
+  fi
+
+  trap - 0 1 2 3
+  return
+}
+
+# Housekeeping and other tasks to run before podget.
+preRunProcess() {
+  local myName=${1} ; shift
+  local startTime=${1} ; shift
+  local VERBOSE=${1}
+
+  local doneTempArchive=${DIR_LOG}/archive/${LOG_COMPLETE}-${startTime}
+  local returnValue=0
+
+  # Copy the "done" file to the archive and add a timestamp to the
+  # filename. This is a different archive process than the "error"
+  # file because podget needs to remember which files it has already
+  # downloaded in order to avoid retrieving the same file multiple
+  # times. postRunProcess cleans up the old entries (FIFO).
+  if ! ${CP} -p "${DIR_LOG}/${LOG_COMPLETE}" "${doneTempArchive}" ; then
+    returnValue=${?}
+    warning "${myName}" "Unable to copy '${DIR_LOG}/${LOG_COMPLETE}' to '${doneTempArchive}' (${returnValue})."
+    sendNotification "${myName}" "${PODGET_MAILTO}" PRE_PROCESS_ERROR \
+                     "Warning: Unable to copy '${DIR_LOG}/${LOG_COMPLETE}' to '${doneTempArchive}' (${returnValue}). Podcast aging records may be off. Seek professional help if this condition persists."
+  fi
+
+  return "${returnValue}"
+}
+
+# Housekeeping and other tasks to run after podget. Tasks include:
+#
+# - archive the contents of the "done" file (${LOG_COMPLETE}) for this
+# run. We do this in order to be able to delete old entries that we no
+# longer want. The assumption is that old podcasts are deleted from
+# the feed server and we will not see them again. Without this
+# housekeeping, the ${LOG_COMPLETE} file grows without bound. We want
+# to keep 'done' files around for a while so we can see when a
+# specific podcast was downloaded.
+#
+postRunProcess() {
+  local myName=${1} ; shift
+  local startTime=${1} ; shift
+  local VERBOSE=${1}
+
+  local doneTempArchive=${DIR_LOG}/archive/${LOG_COMPLETE}-${startTime}
+  local archivePrefix=${LOG_COMPLETE}
+  local returnValue=0
+  local tmpfile
+
+  # This temporary file will be used several times in this process.
+  if ! tmpfile=$(${MKTEMP}) ; then
+    # shellcheck disable=SC2046
+    return $(error "${myName}" "Unable to create temporary storage for podget post processing (${?}). I am done.")
+  fi
+
+  # shellcheck disable=SC2064 # We want the variable to be expanded now.
+  trap "${RM} -f ${tmpfile} ${doneTempArchive} ; trap - ; return ;" 0 1 2 3
+
+  # Find new additions to the LOG_COMPLETE file and save just those
+  # lines.
+  # shellcheck disable=SC2016
+  ${DIFF} "${doneTempArchive}" "${DIR_LOG}/${LOG_COMPLETE}" | ${AWK} '/^> /{print $2}' > "${tmpfile}"
+
+  # Save the diff output only if podget downloaded any new files.
+  if [[ -s "${tmpfile}" ]] ; then
+
+    # Name the archive filename with a timestamp so we can easily see
+    # the date and time of this podget run. This archive file contains
+    # the names of files retrieved in this run of podget.
+    # shellcheck disable=SC2016
+    checkSum=$(${SHA256SUM} "${tmpfile}" | ${AWK} '{print $1}')
+    # shellcheck disable=SC2086 # startTime *is* quoted.
+    if [[ -n "${checkSum}" ]] ; then
+      if ! ${MV} "${tmpfile}" "${DIR_LOG}/archive/${archivePrefix}-$(strftime '%Y%m%d:%H%M%S' ${startTime})-${checkSum}" ; then
+        warning "${myName}" "Unable to save '${tmpfile}' as completion file '${DIR_LOG}/archive/${archivePrefix}-$(strftime "%Y%m%d:%H%M%S" ${startTime})-${checkSum}' (${?})."
+        ${RM} -f "${tmpfile}"
+      fi
+    else
+      warning "${myName}" "Unable to calculate SHA256 checksum of '${tmpfile}' (${?})."
+      ${RM} -f "${tmpfile}"
+    fi
+
+  else
+    ${RM} -f "${tmpfile}"
+    notice "${myName}" "No differences found in ${doneTempArchive}; no archive file aging necessary."
+  fi
+
+  if [[ -z "${PODGET_AGE_THRESHOLD}" ]] ; then
+    sendNotification "${myName}" "${PODGET_MAILTO}" POST_PROCESS_ERROR \
+                     "Warning: Missing value for 'PODGET_AGE_THRESHOLD'. Without that value I cannot purge old entries from the podget 'done' file. Seek professional help if this condition persists."
+    # shellcheck disable=SC2046
+    return $(error "${myName}" "Missing value for 'PODGET_AGE_THRESHOLD'. Without that value I cannot purge old entries from the podget 'done' file.")
+  fi
+
+  # Purge lines from LOG_COMPLETE that are older than
+  # PODGET_AGE_THRESHOLD (set in ${DIR_CONFIG}/${CONFIG_NOTIFY})
+  ${FIND} "${DIR_LOG}/archive" -maxdepth 1 -name "${archivePrefix}"-\* -mtime +"${PODGET_AGE_THRESHOLD}" -print | while read filename ; do
+    # Verify the checksum just for fun.
+    # shellcheck disable=SC2016
+    checksum=$(${SHA256SUM} "${filename}" | ${AWK} '{print $1}')
+    # Changed the archive prefix in summer 2019 to include the date
+    # and time of the archive file; accomodate both forms of
+    # filename.
+    if ! [[ ${filename##*${archivePrefix}*-} == "${checksum}" ]] ; then
+      warning "${myName}" "Checksum '${checksum}' does not match file name ${filename:t}. Please find someone who knows what to do about this."
+      continue
+    fi
+
+    # This is the crux of the aging process: use the contents of
+    # the file ${filename} to search for and delete old entries
+    # in the podget ${LOG_COMPLETE} file.
+    if ! ${GREP} -v -f "${filename}" "${DIR_LOG}/${LOG_COMPLETE}" > "${tmpfile}" ; then
+      warning "${myName}" "Unable to find old entries from '${filename}' in '${DIR_LOG}/${LOG_COMPLETE}' (${GREP}: ${?}). Seek help if this condition persists."
+      ${RM} -f "${tmpfile}"
+      continue
+    fi
+
+    if ! ${MV} "${tmpfile}" "${DIR_LOG}/${LOG_COMPLETE}" ; then
+      warning "${myName}" "Unable to purge entries from '${DIR_LOG}/${LOG_COMPLETE}' (${MV} failed: ${?})."
+      ${RM} -f "${tmpfile}"
+      continue
+    fi
+
+    # shellcheck disable=SC2086 # filename *is* quoted.
+    notice "${myName}" "Successfully purged $(${WC} -l ${filename}|${CUT} -d' ' -f1) row(s) from '${DIR_LOG}/${LOG_COMPLETE}'."
+    ${RM} -f "${filename}"
+
+  done
+
+  ${RM} -f "${doneTempArchive}"
+  trap - 0 1 2 3
+
+  return
+}
+
+# Simple file archiver with removal of archived files older than a
+# month old.
+archiveFile() {
+  local myName=${1} ; shift
+  local fileName=${1} ; shift
+  local archiveLocation=${1} ; shift
+  local VERBOSE=${1}
+
+  local currentDateTime
+  local returnValue=0
+
+  currentDateTime=$(strftime "%F-%H%M%S" "${EPOCHSECONDS}")
+
+  # Attempt to create the archive location if it does not exist.
+  if ! [[ -d "${archiveLocation}" ]] ; then
+    if ${MKDIR} -p "${archiveLocation}" ; then
+      notice "${myName}" "Created archive directory '${archiveLocation}' for '${fileName}'."
+    else
+      warning "${myName}" "Unable to create directory '${archiveLocation}' for '${fileName}'. Seek professional help."
+      returnValue=2
+    fi
+  fi
+
+  if ${MV} "${fileName}" "${archiveLocation}/${fileName:t}-${currentDateTime}" ; then
+    notice "${myName}" "Archived '${fileName}' to '${archiveLocation}'."
+  else
+    warning "${myName}" "Unable to move '${fileName}' to '${archiveLocation}'. You should probably clean this up."
+    returnValue=3
+  fi
+
+  # Clean up old copies of archived files. We do not really care
+  # whether this succeeds, but will output the name(s) of the deleted
+  # files if any are found.
+  if (( returnValue == 0 )) ; then
+    notice "${myName}" "Removing archived copies of '${fileName:t}'..."
+    ${FIND} "${archiveLocation}" -iname "${fileName:t}"\* -mtime +31 -print -delete
+    returnValue=${?}
+  fi
+
+  return "${returnValue}"
+}
+
+notice() {
+  local myName=${1}
+  local message=${2}
+
+  ${LOGGER} -t "${myName}" -p local7.notice -i "NOTICE: ${message}"
+}
+
+warning() {
+  local myName=${1}
+  local message=${2}
+
+  ${LOGGER} -t "${myName}" -p local7.warn -i "WARNING: ${message}"
+}
+
+error() {
+  local myName=${1}
+  local message=${2}
+
+  ${LOGGER} -t "${myName}" -p local7.err -i "ERROR: ${message}"
+
+  echo 254
+  return 254
+}
+
+##############################################################################
+## Script main line
+##############################################################################
+
+############# BEGIN external shell commands used in this script. #############
+# This script uses these 22 external commands.
+# Look for them in their upper case, parameter expanded form.
+typeset -a our_commands
+our_commands=( awk cat cp cut diff find getopt grep kill logger mkdir mktemp mv pidof podget rm sed sha256sum sleep sort touch wc )
+# Find the executables we need; this uses some basic shell and a ZSH trick:
+# the (U) in the eval says to evaluate the parameter as all upper case
+# letters. This snippet generates shell parameters representing the upper case
+# equivalent of the command names and sets the parameter values to the full path
+# of the commands.
+# Refresh this segment in Emacs by marking the appropriate region (or the whole
+# buffer with C-xH) and replacing it with C-uM-|mk-ourCommands (shell-command-on-region).
+for C in ${our_commands[*]} ; do
+  for D in ${path} ; do
+    # shellcheck disable=SC2140,SC2086 # we need the quotes
+    [[ -x "${D}/${C}" ]] && { eval "${(U)C//-/_}"="${D}/${C}" ; break ; }
+  done
+  # shellcheck disable=SC2086 # we need the quotes
+  [[ -x $(eval print \$${(U)C//-/_}) ]] || { print "Cannot find ${C}! Done."; return 1 ; }
+done
+unset our_commands
+############## END external shell commands used in this script. ##############
+
+# Set some defaults, and see below for ways to override these defaults.
+DIR_CONFIG=@PODGET_DIR_CONFIG@
+CONFIG_CORE=podgetrc
+CONFIG_NOTIFY=notifyrc
+
+# Process command line options.
+# We use the same option names and values as podget.
+if ! TEMP=$(${GETOPT} -o c:d:n:Vvh --long config:,dir_config:,config_notify:,version,verbose,help -n "${0:t}" -- "${@}") ; then
+  echo "getopt(1) Fatal Error (${?}). Terminating..." >&2
+  return 1
+fi
+eval set -- "${TEMP}"
+while : ; do
+  case "${1}" in
+    -c|--config) CONFIG_CORE=${2} ; shift 2 ;;
+    -d|--dir_c*) DIR_CONFIG=${2} ; shift 2 ;;
+    -n|--config_n*) CONFIG_NOTIFY=${2} ; shift 2 ;;
+    -h|--help*) usage "${myName}" ; exit ;;
+    -v|--verb*) VERBOSE=1 ; shift ;;
+    -V|--vers*) showVersion=1 ; shift ;;
+    --) shift ; break ;;
+    *) echo "${0##*/}: getopt internal error! Terminating..." >&2 ; return 1 ;;
+  esac
+done
+
+if ((showVersion)) ; then
+  echo "${0:t}: version ${vMajor}.${vMinor}.${vPatch}-${${vHash#\$Hash: }%$}"
+  exit 0
+fi
+
+# Log STDOUT and STDERR of this script and all commands called by this
+# script to separate files.
+exec 1> "/var/tmp/${0:t}.out"
+exec 2> "/var/tmp/${0:t}.err"
+
+# DIR_CONFIG is resolved at runtime, don't worry about it.
+# shellcheck disable=SC1090
+[[ -r ${DIR_CONFIG}/${CONFIG_CORE} ]] && source "${DIR_CONFIG}/${CONFIG_CORE}"
+# shellcheck disable=SC2046
+[[ -n "${CONFIG_SERVERLIST}" ]] ||
+  exit $(error "${myName}" "Failed to get a setting for 'CONFIG_SERVERLIST'. Does '${DIR_CONFIG}/${CONFIG_CORE}' exist?")
+# shellcheck disable=SC1090
+[[ -r ${DIR_CONFIG}/${CONFIG_NOTIFY} ]] && source "${DIR_CONFIG}/${CONFIG_NOTIFY}"
+# shellcheck disable=SC2046
+[[ -n "${PODGET_RUNTIME_DATA}" ]] ||
+  exit $(error "${myName}" "Failed to get the setting for 'PODGET_RUNTIME_DATA'. Does '${DIR_CONFIG}/${CONFIG_NOTIFY}' exist?")
+
+# Remember when we started running.
+startTime=${EPOCHSECONDS}
+
+# Create the log directory if it does not already exist.
+[[ -d "${DIR_LOG}" ]] || ${MKDIR} "${DIR_LOG}" || {
+    sendNotification "${myName}" "${PODGET_MAILTO}" INTERNAL_ERROR "Could not create log directory '${DIR_LOG}'. Cannot continue." ;
+    # shellcheck disable=SC2046
+    exit $(error "${myName}" "Could not create log directory '${DIR_LOG}'. Cannot continue.") ;
+  }
+
+##########################################################################################
+## Make sure no other instances of podget are running
+##########################################################################################
+
+# Is podget running?
+# We need the output of pidof(1) to be unquoted.
+# shellcheck disable=SC2207
+if podgetPIDs=( $(${PIDOF} -x podget) ) ; then
+
+  # Figure out how long that instance has been running and kill it,
+  # then notify if it has been running for too long.
+  if [[ -r ${DIR_LOG}/${PODGET_RUNTIME_DATA} ]] ; then
+
+    # shellcheck disable=SC2016
+    lastStart=$(${AWK} '/^start-time/{print $2}' "${DIR_LOG}/${PODGET_RUNTIME_DATA}")
+
+    # If lastStart is not set it gets evaluated as zero.
+    if (( ( startTime - lastStart ) > PODGET_REASONABLE_RUNTIME )) ; then
+
+      # startTime *is* quoted.
+      # shellcheck disable=SC2086
+      warning "${myName}" "TIMEOUT: podget appears to be still running at $(strftime %T ${startTime}). Last start was at $(strftime %T ${lastStart})."
+      # startTime *is* quoted.
+      # shellcheck disable=SC2086
+      sendNotification "${myName}" "${PODGET_MAILTO}" TIMEOUT "podget appears to be still running at $(strftime %T ${startTime}). Last start was at $(strftime %T ${lastStart})."
+
+      for pid in ${podgetPIDs[*]} ; do
+
+        # Try to be kind in killing the process
+        ${KILL} -HUP "${pid}"
+        ${SLEEP} 3
+        if [[ -d /proc/${pid} ]] ; then
+
+          # Be a little more persistent.
+          ${KILL} "${pid}"
+          ${SLEEP} 3
+          if [[ -d /proc/${pid} ]] ; then
+
+            # The nuclear option -- just kill it.
+            ${KILL} -9 "${pid}"
+            ${SLEEP} 3
+            if [[ -d /proc/${pid} ]] ; then
+
+              sendNotification "${myName}" "${PODGET_MAILTO}" TERMINATE "Cannot terminate wayward instance of a running podget (PID=${pid}). Aborting."
+	      # shellcheck disable=SC2046,SC2086
+              exit $(error "${myName}" "Cannot terminate running podget. PID is ${pid}.")
+            fi
+          fi
+        fi
+      done
+
+    else
+
+      # podget is running but for less than the reasonable time. Just quit.
+      updateRuntimeData "${myName}" check-time "${startTime}"
+
+    fi
+
+  else
+
+    sendNotification "${myName}" "${PODGET_MAILTO}" INTERNAL_ERROR "WHAT? podget seems to be running, but missing '${DIR_LOG}/${PODGET_RUNTIME_DATA}'. Aborting."
+    # shellcheck disable=SC2046,SC2086
+    exit $(error "${myName}" "podget running but missing ${DIR_LOG}/${PODGET_RUNTIME_DATA}.")
+
+  fi
+else
+
+  # Execute pre-podget-run tasks.
+  preRunProcess "${myName}" "${startTime}" "${VERBOSE}"
+
+  updateRuntimeData "${myName}" start-time "${startTime}"
+
+  # podget is not running, so go ahead and launch it.
+  # Convert our "--verbose" to a "-vv" for podget, add up to two more
+  # "v" to increase the verbosity of podget.
+  ${PODGET} ${VERBOSE:+-vv} --dir_config "${DIR_CONFIG}" --config "${CONFIG_CORE}"
+
+  if ! updateRuntimeData "${myName}" start-time DELETE ; then
+    warning "${myName}" "INTERNAL_ERROR: Failed to clean up podget runtime data. Please look into this."
+    sendNotification "${myName}" "${PODGET_MAILTO}" INTERNAL_ERROR "Failed to clean up podget runtime data. Please look into this." "/var/tmp/${0:t}.err"
+  fi
+
+  # Execute post-podget-run tasks.
+  postRunMessage=$(postRunProcess "${myName}" "${startTime}" "${VERBOSE}")
+  returnValue=${?}
+  if (( returnValue != 0 )) ; then
+    warning "${myName}" "INTERNAL_ERROR: '${postRunMessage}': (${returnValue})."
+    sendNotification "${myName}" "${PODGET_MAILTO}" INTERNAL_ERROR "${postRunMessage} (${returnValue})." "/var/tmp/${0:t}.err"
+  fi
+
+  # Check the various output and log files to make sure things went well.
+  if [[ -s ${DIR_LOG}/${LOG_FAIL} ]] ; then
+
+    # It seems there was a failure, investigate further. LOG_FAIL
+    # contains one URL per line.
+    # We need the output of cat(1) to be unquoted.
+    # shellcheck disable=SC2207
+    failures=( $(${CAT} "${DIR_LOG}/${LOG_FAIL}") )
+    for failure in ${failures[*]} ; do
+      # startTime *is* quoted
+      # shellcheck disable=SC2086
+      warning "${myName}" "At $(strftime %T ${startTime}) podget failed to download the podcast at ${failure}."
+      # startTime *is* quoted
+      # shellcheck disable=SC2086
+      sendNotification "${myName}" "${PODGET_MAILTO}" DOWNLOAD "At $(strftime %T ${startTime}) podget failed to download the podcast at ${failure}. Please look into this and fix things (see attached log file)." "${DIR_LOG}/${LOG_FAIL}"
+    done
+
+    # Archive the error log to prevent reporting the same errors.
+    archiveFile "${myName}" "${DIR_LOG}/${LOG_FAIL}" "${DIR_LOG}/archive" "${VERBOSE}"
+  fi
+fi
+
+#
+# Search for files ending in upper case instances of known extnsions
+# and rename them to use the lower case of that extension.
+#
+${FIND} "${DIR_LIBRARY}" -regextype posix-extended -regex '^.*\.(MP3|FLAC|OGG|M4A)' -print | while read file ; do
+  # Extract everything after the final "." and convert it to lower case.
+  extension=${(L)file##*.}
+  # Move (rename) the file to use its downcased-extension.
+  if ${MV} "${file}" "${file%.*}.${extension}" ; then
+    notice "${myName}" "Renamed downloaded file '${file}' to '${file%.*}.${extension}'."
+  else
+    returnValue=${?}
+    warning "${myName}" "Could not rename downloaded file '${file}' to '${file%.*}.${extension}' (Error: ${returnValue})"
+    sendNotification "${myName}" "${PODGET_MAILTO}" RENAME "Could not rename downloaded file '${file}' to '${file%.*}.${extension}' (Error: ${returnValue})"
+  fi
+done
+
+exit
+
+# Local Variables: ***
+# mode:shell-script ***
+# indent-tabs-mode: f ***
+# sh-indentation: 2 ***
+# sh-basic-offset: 2 ***
+# sh-indent-for-do: 0 ***
+# sh-indent-after-do: + ***
+# sh-indent-comment: t ***
+# sh-indent-after-case: + ***
+# sh-indent-after-done: 0 ***
+# sh-indent-after-else: + ***
+# sh-indent-after-if: + ***
+# sh-indent-after-loop-construct: + ***
+# sh-indent-after-open: + ***
+# sh-indent-after-switch: + ***
+# sh-indent-for-case-alt: ++ ***
+# sh-indent-for-case-label: + ***
+# sh-indent-for-continuation: + ***
+# sh-indent-for-done: 0 ***
+# sh-indent-for-else: 0 ***
+# sh-indent-for-fi: 0 ***
+# sh-indent-for-then: 0 ***
+# End: ***
