@@ -2,3 +2,8 @@
 	* Initial release.
 2021-03-28 David Klann <dklann@broadcasttool.com>
 	* Shellcheck zsh-functions.
+2021-04-17 David Klann <dklann@broadcasttool.com>
+	* Fix logic error on committing the schedule
+	* usage() cleanup
+	* internal cleanup
+	* do not trap SIGHUP so people can simply [X] the window

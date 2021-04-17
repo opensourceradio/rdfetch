@@ -36,7 +36,7 @@ colors
 # This script complies with Semantic Versioning: http://semver.org/
 vMajor=
 vMinor=3
-vPatch=8
+vPatch=9
 vHash='$Hash$'
 
 # Get zsh functions necessary for this script.
@@ -98,7 +98,7 @@ function addOrReplaceFeed() {
     return "${returnValue}"
   fi
 
-  trap 'trap - ; return ;' 0 1 2 3
+  trap 'trap - ; return ;' 0 2 3
 
   # Make a backup copy of serverlist before we make any changes.
   ${CP} ${DIR_CONFIG}/${CONFIG_SERVERLIST} ${backupServerlist}
@@ -124,7 +124,7 @@ function addOrReplaceFeed() {
   echo
 
   titleParserXSL=$(makeParser /rss/channel/title)
-  trap "${RM} -f ${titleParserXSL} ; trap - ; return ;" 0 1 2 3
+  trap "${RM} -f ${titleParserXSL} ; trap - ; return ;" 0 2 3
 
   ##########################################################################################
   ## Get the feed title, either by its own XML (with xsltproc), or by
@@ -150,7 +150,7 @@ function addOrReplaceFeed() {
   fi
 
   ${RM} -f ${titleParserXSL}
-  trap 'trap - ; return ;' 0 1 2 3
+  trap 'trap - ; return ;' 0 2 3
 
   ##########################################################################################
   ## Prompt for a name, use the feed title previously obtained if the
@@ -217,7 +217,7 @@ function addOrReplaceFeed() {
   local tmpfile
   tmpfile=$(${MKTEMP})
 
-  trap "${RM} -f ${tmpfile}; trap - ; return ;" 0 1 2 3
+  trap "${RM} -f ${tmpfile}; trap - ; return ;" 0 2 3
 
   # Same group and name (possibly different URL?).
   if ${GREP} -P -q "^[^#].*\s+${group}\s+${feedName}\s*" ${DIR_CONFIG}/${CONFIG_SERVERLIST} ; then
@@ -319,7 +319,7 @@ function enableFeed() {
 
   local feedList feedNameEntered feedName group tmpfile
 
-  trap 'trap - 0 1 2 3 ; return ;' 0 1 2 3
+  trap 'trap - 0 2 3 ; return ;' 0 2 3
 
   feedList=$(${GREP} '^#DISABLED#' ${DIR_CONFIG}/${CONFIG_SERVERLIST} | ${AWK} '{print $3}')
 
@@ -358,7 +358,7 @@ function enableFeed() {
 
     echo "Enabling '${feedName}' in the feed list... \c"
 
-    trap "${RM} -f ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak ; trap - ; return ;" 0 1 2 3
+    trap "${RM} -f ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak ; trap - ; return ;" 0 2 3
 
     ${SED} -i.bak -e "/^#DISABLED#.*[[:space:]]${feedName}[[:space:]]*/s/^#DISABLED#//" ${DIR_CONFIG}/${CONFIG_SERVERLIST}
     # The sed command *should* result in exactly one line of
@@ -410,7 +410,7 @@ function deleteFeed() {
 
   local feedList feedNameEntered feedName deleteOrDisable tmpfile group
 
-  trap 'trap - ; return ;' 0 1 2 3
+  trap 'trap - ; return ;' 0 2 3
 
   feedList=$(${GREP} -v '^#' ${DIR_CONFIG}/${CONFIG_SERVERLIST} | ${AWK} '{print $3}' | ${SORT})
 
@@ -459,7 +459,7 @@ function deleteFeed() {
   if [[ "${deleteOrDisable}" = 'd' ]] ; then
     echo "Disabling '${feedName}' in the feed list... \c"
 
-    trap "${RM} -f ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak ; trap - ; return ;" 0 1 2 3
+    trap "${RM} -f ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak ; trap - ; return ;" 0 2 3
 
     ${SED} -i.bak -e "/[[:space:]]${feedName}[[:space:]]*/s/^/#DISABLED#/" "${DIR_CONFIG}/${CONFIG_SERVERLIST}"
     # The sed command *should* result in exactly one line of
@@ -470,12 +470,12 @@ function deleteFeed() {
 
     ${RM} -f ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak
 
-    trap 'trap - ; return ;' 0 1 2 3
+    trap 'trap - ; return ;' 0 2 3
   elif [[ "${deleteOrDisable}" = 'D' ]] ; then
     echo "Deleting feed '${feedName}' from the feed list... \c"
 
     tmpfile=$(${MKTEMP})
-    trap "${RM} -f ${tmpfile}; trap - ; return ;" 0 1 2 3
+    trap "${RM} -f ${tmpfile}; trap - ; return ;" 0 2 3
 
     ${GREP} -v "[[:space:]]${feedName}[[:space:]]*" ${DIR_CONFIG}/${CONFIG_SERVERLIST} > ${tmpfile}
 
@@ -521,7 +521,7 @@ function showFeeds() {
   activeCount=$(${GREP} -c -Ev '^\s*(#|$)' ${DIR_CONFIG}/${CONFIG_SERVERLIST})
   disabledCount=$(${SED} -e '1,/^# ---------/d' < ${DIR_CONFIG}/${CONFIG_SERVERLIST} | ${GREP} -c '^#DISABLED#')
 
-  trap 'trap - ; return ;' 0 1 2 3
+  trap 'trap - ; return ;' 0 2 3
 
   (
     # The header.
@@ -566,7 +566,7 @@ function showLastStatus() {
   local statusFile="${STATUS_FILE:-/var/tmp/podget-wrapper.${type}}"
   local fileTime
 
-  trap 'trap - ; return ;' 0 1 2 3
+  trap 'trap - ; return ;' 0 2 3
 
   case ${type} in
     out) OUTPUT="output results" ;;
@@ -623,7 +623,7 @@ function showRDimportLogs() {
   local returnValue=0
   local -a logFiles
 
-  trap 'trap - ; return ;' 0 1 2 3
+  trap 'trap - ; return ;' 0 2 3
 
   # Ignore recommendations to use "`mapfile` or `read -a`"
   # when setting array variable
@@ -675,7 +675,7 @@ function clearRDimportLog() {
   local -a logFiles
   local logfileIndex chosenFile
 
-  trap 'trap - ; return ;' 0 1 2 3
+  trap 'trap - ; return ;' 0 2 3
 
   # Ignore recommendations to use "`mapfile` or `read -a`"
   # when setting array variable
@@ -724,7 +724,7 @@ function editSchedule() {
 
   local minute oMinute hour oHour crontab ok
 
-  trap 'trap - ; return ;' 0 1 2 3
+  trap 'trap - ; return ;' 0 2 3
 
   # Snag the current crontab for later processing.
   # The variable CRONTAB actually *is* assigned.
@@ -835,7 +835,7 @@ function editFile() {
   local -r filename=${1} ; shift
   local -r verbose=${1}
 
-  trap 'trap - ; return ;' 0 1 2 3
+  trap 'trap - ; return ;' 0 2 3
 
   ${VISUAL:-${EDITOR:-nano}} ${filename}
 
@@ -846,7 +846,7 @@ function cronEdit() {
   local -r myName=${1} ; shift
   local -r verbose=${1}
 
-  trap 'trap - ; return ;' 0 1 2 3
+  trap 'trap - ; return ;' 0 2 3
 
   ((verbose)) && echo "${myName}: directly editing crontab."
 
@@ -1016,7 +1016,7 @@ function showRDDropboxes() {
     return "${returnValue}"
   fi
 
-  trap 'trap - 0 1 2 3 ; return ;' 0 1 2 3
+  trap 'trap - 0 2 3 ; return ;' 0 2 3
 
   # Find the longest dropbox pathname and the longest Cart title so we
   # can set the column widths.
