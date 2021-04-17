@@ -16,7 +16,7 @@
 ##
 ## rdfetch
 ##
-## Copyright 2020, David Klann <dklann@broadcasttool.com>
+## Copyright 2021, David Klann <dklann@broadcasttool.com>
 ##
 ## A Broadcast Tool & Die tool to manage podcast feeds (i.e., RSS,
 ## ATOM, etc.)  and downloads by podget(1), for later import into a
@@ -36,10 +36,12 @@ colors
 # This script complies with Semantic Versioning: http://semver.org/
 vMajor=
 vMinor=3
-vPatch=7
+vPatch=8
 vHash='$Hash$'
 
 # Get zsh functions necessary for this script.
+# SC1091: breaks before running configure.
+# shellcheck disable=SC1091
 if [[ -r @bindir@/zsh-functions ]] ; then
   source @bindir@/zsh-functions
 else
@@ -51,37 +53,41 @@ fi
 ##########################################################################################
 
 # How to use this command.
-usage() {
-  myName=${1}
+function usage() {
+  local -r myName="${1:t}"
 
   ${CAT} << EOF
+
 ${myName}: add a new RSS feed to the list of podcasts.
 
-Summary: ${myName##*/} [ --verbose (-v) ] [ --version (-V) ] [ --help (-h) ]
-                       [ --config (-c) <podget_configuration_file> ]
-                       [ --dir_config (-d) <podget_configuration_directory> ]
+SUMMARY
 
+${myName} [ --verbose (-v) ] [ --version (-V) ] [ --help (-h) ]
+        [ --config (-c) <podget_configuration_file> ]
+        [ --dir_config (-d) <podget_configuration_directory> ]
 
-${myName##*/} is a text-menu driven command-line tool for fetching and
+DESCRIPTION
+
+${myName} is a text-menu driven command-line tool for fetching and
 importing audio files from podcasts (also known as RSS feeds) into the
 Rivendell Radio Automation System.  By default, a new cart will be
 created for each podcast, although this behavior can be modified by
 choosing the appropriate option when adding a podcast.
 
-${myName##*/} leads you through the process using a text-based wizard,
+${myName} leads you through the process using a text-based wizard,
 asking questions about the podcast you want to retrieve and where to
 store the audio in Rivendell.
 
 EOF
 }
 
-addOrReplaceFeed() {
-  local myName=${1} ; shift
-  local verbose=${1}
+function addOrReplaceFeed() {
+  local -r myName=${1} ; shift
+  local -r verbose=${1}
 
   local feedURL feedUser feedPassword protocol hostANDport route urlWithCredentials titleParserXSL
   local feedTitle name group rivendellGroupList
-  local backupServerlist=/var/tmp/${CONFIG_SERVERLIST##*/}
+  local backupServerlist=/var/tmp/${CONFIG_SERVERLIST:t}
   local replaceFeed=0 addNewFeed=1
   local ok returnValue=0
 
@@ -307,9 +313,9 @@ EOF
   trap -
 }
 
-enableFeed() {
-  local myName=${1} ; shift
-  local verbose=${1}
+function enableFeed() {
+  local -r myName=${1} ; shift
+  local -r verbose=${1}
 
   local feedList feedNameEntered feedName group tmpfile
 
@@ -398,9 +404,9 @@ Please fix the file '${DIR_CONFIG}/${CONFIG_SERVERLIST}' manually."
   trap -
 }
 
-deleteFeed() {
-  local myName=${1} ; shift
-  local verbose=${1}
+function deleteFeed() {
+  local -r myName=${1} ; shift
+  local -r verbose=${1}
 
   local feedList feedNameEntered feedName deleteOrDisable tmpfile group
 
@@ -506,9 +512,9 @@ deleteFeed() {
   trap -
 }
 
-showFeeds() {
-  local myName=${1} ; shift
-  local verbose=${1}
+function showFeeds() {
+  local -r myName=${1} ; shift
+  local -r verbose=${1}
 
   local activeCount=0 disabledCount=0
 
@@ -552,10 +558,10 @@ showFeeds() {
   trap -
 }
 
-showLastStatus() {
-  local myName=${1} ; shift
-  local type=${1} ; shift
-  local verbose=${1}
+function showLastStatus() {
+  local -r myName=${1} ; shift
+  local -r type=${1} ; shift
+  local -r verbose=${1}
 
   local statusFile="${STATUS_FILE:-/var/tmp/podget-wrapper.${type}}"
   local fileTime
@@ -610,9 +616,9 @@ showLastStatus() {
 }
 
 # Gather and display all the rdimport.log files we can find.
-showRDimportLogs() {
-  local myName=${1} ; shift
-  local verbose=${1}
+function showRDimportLogs() {
+  local -r myName=${1} ; shift
+  local -r verbose=${1}
 
   local returnValue=0
   local -a logFiles
@@ -661,9 +667,9 @@ showRDimportLogs() {
 }
 
 # Zero out (delete the contents of) the specified rdimport log file.
-clearRDimportLog() {
-  local myName=${1} ; shift
-  local verbose=${1}
+function clearRDimportLog() {
+  local -r myName=${1} ; shift
+  local -r verbose=${1}
 
   local returnValue=0
   local -a logFiles
@@ -712,9 +718,9 @@ clearRDimportLog() {
   return "${returnValue}"
 }
 
-editSchedule() {
-  local myName=${1} ; shift
-  local verbose=${1}
+function editSchedule() {
+  local -r myName=${1} ; shift
+  local -r verbose=${1}
 
   local minute oMinute hour oHour crontab ok
 
@@ -794,7 +800,7 @@ EOF
 
     echo "Using 'hour: ${hour}' and 'minute: ${minute}' for the podcast download schedule."
 
-    if getYesNo "Press 'y' to commit this schedule, or 'n' to cancel" ; then
+    if ! getYesNo "Press 'y' to commit this schedule, or 'n' to cancel" ; then
       echo "Canceling this schedule change. Please try your call again later."
       read ok\?"Press <Enter> to continue. "
       trap -
@@ -824,10 +830,10 @@ EOF
   trap -
 }
 
-editFile() {
-  local myName=${1} ; shift
-  local filename=${1} ; shift
-  local verbose=${1}
+function editFile() {
+  local -r myName=${1} ; shift
+  local -r filename=${1} ; shift
+  local -r verbose=${1}
 
   trap 'trap - ; return ;' 0 1 2 3
 
@@ -836,9 +842,9 @@ editFile() {
   trap -
 }
 
-cronEdit() {
-  local myName=${1} ; shift
-  local verbose=${1}
+function cronEdit() {
+  local -r myName=${1} ; shift
+  local -r verbose=${1}
 
   trap 'trap - ; return ;' 0 1 2 3
 
@@ -850,12 +856,12 @@ cronEdit() {
   return
 }
 
-addRDDropbox() {
-  local myName=${1} ; shift
-  local dirLibrary=${1} ; shift
-  local feedName=${1} ; shift
-  local feedGroup=${1} ; shift
-  local verbose=${1}
+function addRDDropbox() {
+  local -r myName=${1} ; shift
+  local -r dirLibrary=${1} ; shift
+  local -r feedName=${1} ; shift
+  local -r feedGroup=${1} ; shift
+  local -r verbose=${1}
 
   local createANewDropbox=0
   local returnValue=1
@@ -996,9 +1002,9 @@ Enter an existing CART number to assign to this podcast feed: "
   return "${returnValue}"
 }
 
-showRDDropboxes() {
-  local myName=${1} ; shift
-  local verbose=${1}
+function showRDDropboxes() {
+  local -r myName=${1} ; shift
+  local -r verbose=${1}
 
   local query="select d.ID,d.STATION_NAME,d.PATH,d.GROUP_NAME,d.TO_CART,d.DELETE_CUTS,c.TITLE,u.ORIGIN_DATETIME from DROPBOXES d join CART c on d.TO_CART = c.NUMBER join CUTS u on c.NUMBER = u.CART_NUMBER where d.PATH like '${DIR_LIBRARY}/%' order by d.PATH"
   local id stationName boxpath group cart dropcuts title origin_datetime
@@ -1049,9 +1055,9 @@ showRDDropboxes() {
   return
 }
 
-showDropboxStatus() {
-  local myName=${1} ; shift
-  local verbose=${1}
+function showDropboxStatus() {
+  local -r myName=${1} ; shift
+  local -r verbose=${1}
 
   local ok
 
@@ -1065,10 +1071,10 @@ showDropboxStatus() {
 
 # Delete a Rivendell dropbox.
 # This is called from inside a trap() handler, so no additional handling required.
-deleteRDDropbox() {
-  local myName=${1} ; shift
-  local pathPrefix=${1} ; shift
-  local verbose=${1}
+function deleteRDDropbox() {
+  local -r myName=${1} ; shift
+  local -r pathPrefix=${1} ; shift
+  local -r verbose=${1}
 
   local returnValue=0
 
@@ -1137,11 +1143,11 @@ EOF
 
 # Stop any running instance of rdimport, and remove the dropbox directory.
 # This is called from inside a trap() handler, so no additional handling required.
-cleanupFeed() {
-  local myName=${1} ; shift
-  local group=${1} ; shift
-  local feedName=${1} ; shift
-  local verbose=${1}
+function cleanupFeed() {
+  local -r myName=${1} ; shift
+  local -r group=${1} ; shift
+  local -r feedName=${1} ; shift
+  local -r verbose=${1}
 
   local pathPrefix=${DIR_LIBRARY}/${group}/${feedName}
   local id
@@ -1187,8 +1193,9 @@ cleanupFeed() {
   return "${returnValue}"
 }
 
-makeParser() {
-  local selection=${1:?"Need an XML selection."}
+function makeParser() {
+  local -r selection=${1:?"Need an XML selection."}
+
   local tmpfile
 
   tmpfile=$(${MKTEMP}) || { echo '' ; return 2 ; }
@@ -1210,13 +1217,13 @@ EOF
   echo ${tmpfile}
 }
 
-createDropbox() {
-  local feedGroup=${1:?"Need a Rivendell GROUP to assign to this dropbox."} ; shift
-  local feedName=${1:?"Need a podcast feed name for this dropbox."} ; shift
-  local dirLibrary=${1:?"Need a DIR_LIBRARY for this dropbox."} ; shift
-  local fileExt=${1:?"Need a file extension (type) for this dropbox."} ; shift
-  local cartNumber=${1:?"Need a CART number for this dropbox."} ; shift
-  local verbose=${1}
+function createDropbox() {
+  local -r feedGroup=${1:?"Need a Rivendell GROUP to assign to this dropbox."} ; shift
+  local -r feedName=${1:?"Need a podcast feed name for this dropbox."} ; shift
+  local -r dirLibrary=${1:?"Need a DIR_LIBRARY for this dropbox."} ; shift
+  local -r fileExt=${1:?"Need a file extension (type) for this dropbox."} ; shift
+  local -r cartNumber=${1:?"Need a CART number for this dropbox."} ; shift
+  local -r verbose=${1}
 
   local dropboxPath="${dirLibrary}/${feedGroup}/${feedName}"
   local returnValue=0
@@ -1281,8 +1288,8 @@ createDropbox() {
 
 # Return 0 ("success") for a "yes"-like response and 1 ("non-success")
 # for a "no"-like response to the given prompt.
-getYesNo() {
-  local prompt="${1}"
+function getYesNo() {
+  local -r prompt="${1}"
 
   local response=''
   until [[ "${(L)response}" =~ ^(no*|y(es)*)$ ]] ; do
@@ -1295,19 +1302,19 @@ getYesNo() {
   return 0
 }
 
-warning() {
-  local message=${1}
+function warning() {
+  local -r message=${1}
 
   ${CAT} >&2 <<EOF
 
-${BOLD}${YELLOW}WARNING:${NORM}
+${BOLD}${YELLOW}Warning:${NORM}
 $(${FMT} -w 79 <<< ${message})
 
 EOF
 }
 
-error() {
-  local message=${1}
+function error() {
+  local -r message=${1}
 
   ${CAT} >&2 <<EOF
 
@@ -1336,23 +1343,23 @@ our_commands=( awk cat chmod column cp crontab diff find fmt getopt grep less mk
 # Refresh this segment in Emacs by marking the appropriate region (or the whole
 # buffer with C-xH) and replacing it with C-uM-|mk-ourCommands (shell-command-on-region).
 for C in ${our_commands[*]} ; do
+  # shellcheck disable=SC2154 # ZSH: ${path} is set by the shell.
   for D in ${path} ; do
     # shellcheck disable=SC2140,SC2086 # we need the quotes
     [[ -x "${D}/${C}" ]] && { eval "${(U)C//-/_}"="${D}/${C}" ; break ; }
   done
-  # shellcheck disable=SC2086 # we need the quotes
-  [[ -x $(eval print \$${(U)C//-/_}) ]] || { print "Cannot find ${C}! Done."; return 1 ; }
+  [[ -x $(eval print \$"${(U)C//-/_}") ]] || { print "Cannot find ${C}! Done."; return 1 ; }
 done
 unset our_commands
 ############## END external shell commands used in this script. ##############
 
 # Set some defaults, and see below for more ways to set these.
-DIR_CONFIG=@PODGET_DIR_CONFIG@
-CONFIG_CORE=podgetrc
-CONFIG_NOTIFY=notifyrc
-VERBOSE=0
+typeset DIR_CONFIG=@PODGET_DIR_CONFIG@
+typeset CONFIG_CORE=podgetrc
+typeset -r CONFIG_NOTIFY=notifyrc
+typeset -i VERBOSE=0
 
-if ! TEMP=$(${GETOPT} -o c:d:Vvh --long config:,dir-config:,version,verbose,help -n "${0##*/}" -- "${@}") ; then
+if ! TEMP=$(${GETOPT} -o c:d:Vvh --long config:,dir-config:,version,verbose,help -n "${0:t}" -- "${@}") ; then
   echo "getopt(1) Fatal Error (${?}). Terminating..." >&2
   return 1
 fi
@@ -1361,48 +1368,44 @@ while : ; do
   # VERBOSE is used, but in a non-Bash way.
   # shellcheck disable=SC2034
   case "${1}" in
-    -c|--conf*) CONFIG_CORE=${2} ; shift 2 ;;
-    -d|--dir-*) DIR_CONFIG=${2} ; shift 2 ;;
-    -h|--help*) usage ${0##*/} ; exit ;;
+    -c|--conf*) CONFIG_CORE="${2}" ; shift 2 ;;
+    -d|--dir-*) DIR_CONFIG="${2}" ; shift 2 ;;
+    -h|--help*) usage "${0}" ; exit ;;
     -v|--verb*) VERBOSE=1 ; shift ;;
     -V|--vers*) showVersion=1 ; shift ;;
     --) shift ; break ;;
-    *) echo "${0##*/}: getopt internal error!. Terminating..." >&2 ; return 1 ;;
+    *) echo "${0:t}: getopt internal error!. Terminating..." >&2 ; return 1 ;;
   esac
 done
 
 if ((showVersion)) ; then
-  echo "${0##*/}: version ${vMajor}.${vMinor}.${vPatch}-${${vHash#\$Hash: }%$}"
+  echo "${0:t}: version ${vMajor}.${vMinor}.${vPatch}-${${vHash#\$Hash: }%$}"
   exit 0
 fi
 
-RED="${fg_bold[red]}"
-YELLOW="${fg_bold[yellow]}"
-BOLD="${bold_color}"
-NORM="${reset_color}"
+typeset -r RED="${fg_bold[red]}"
+typeset -r YELLOW="${fg_bold[yellow]}"
+typeset -r BOLD="${bold_color}"
+typeset -r NORM="${reset_color}"
 # Hard code this for now.
-fileExt=mp3
+typeset -r fileExt=mp3
 
 # Ensure the configuration directory exists.
 if [[ ! -d ${DIR_CONFIG} ]] ; then
   if ! ${MKDIR} -p ${DIR_CONFIG} ; then
     exit "$(error 'Unable to create configuration directory ${DIR_CONFIG}. Make sure your permissions are set so that you have file create and write rights to the ${DIR_CONFIG} directory. Cannot continue.')"
-
   fi
 fi
 
 # Run podget(1) if it appears it has never been run.
-failCount=1
-maxAttempts=10
+typeset -i failCount=1
+typeset -i maxAttempts=10
 until [[ -r ${DIR_CONFIG}/${CONFIG_CORE} ]] ; do
-
   warning "Unable to read configuration file ${DIR_CONFIG}/${CONFIG_CORE}. Running podget to create a new configuration..."
 
   ${PODGET} --dir_config ${DIR_CONFIG}
-
   ((failCount++ > maxAttempts )) &&
     exit "$(error 'Unable to create ${DIR_CONFIG}/${CONFIG_CORE} ${maxAttempts} times. I quit.')"
-
 done
 
 # shellcheck disable=SC1090
@@ -1414,8 +1417,9 @@ done
 ## The guts of why we are here.
 ##########################################################################################
 
-typeset -a menu command
-typeset -R 2 count
+typeset -a menu command windowTitle
+typeset -iR 2 count
+typeset choice
 
 while : ; do
   count=0
@@ -1447,21 +1451,21 @@ while : ; do
     "\[Advanced\] Edit ${USER}\'s crontab file with \'${EDITOR:-${VISUAL:-nano}}\'"
   )
   command=(
-    'addOrReplaceFeed ${0##*/} ${VERBOSE}'
-    'deleteFeed ${0##*/} ${VERBOSE}'
-    'enableFeed ${0##*/} ${VERBOSE}'
-    'showFeeds ${0##*/} ${VERBOSE}'
-    'showLastStatus ${0##*/} out ${VERBOSE}'
-    'showLastStatus ${0##*/} err ${VERBOSE}'
-    'showRDimportLogs ${0##*/} ${VERBOSE}'
-    'clearRDimportLog ${0##*/} ${VERBOSE}'
-    'editSchedule ${0##*/} ${VERBOSE}'
-    'showRDDropboxes ${0##*/} ${VERBOSE}'
-    'showDropboxStatus ${0##*/} ${VERBOSE}'
-    'editFile ${0##*/} ${DIR_CONFIG}/${CONFIG_SERVERLIST} ${VERBOSE}'
-    'editFile ${0##*/} ${DIR_CONFIG}/${CONFIG_NOTIFY} ${VERBOSE}'
-    'editFile ${0##*/} ${PODGET_MAILER_CONFIG} ${VERBOSE}'
-    'cronEdit ${0##*/} ${VERBOSE}'
+    'addOrReplaceFeed ${0:t} ${VERBOSE}'
+    'deleteFeed ${0:t} ${VERBOSE}'
+    'enableFeed ${0:t} ${VERBOSE}'
+    'showFeeds ${0:t} ${VERBOSE}'
+    'showLastStatus ${0:t} out ${VERBOSE}'
+    'showLastStatus ${0:t} err ${VERBOSE}'
+    'showRDimportLogs ${0:t} ${VERBOSE}'
+    'clearRDimportLog ${0:t} ${VERBOSE}'
+    'editSchedule ${0:t} ${VERBOSE}'
+    'showRDDropboxes ${0:t} ${VERBOSE}'
+    'showDropboxStatus ${0:t} ${VERBOSE}'
+    'editFile ${0:t} ${DIR_CONFIG}/${CONFIG_SERVERLIST} ${VERBOSE}'
+    'editFile ${0:t} ${DIR_CONFIG}/${CONFIG_NOTIFY} ${VERBOSE}'
+    'editFile ${0:t} ${PODGET_MAILER_CONFIG} ${VERBOSE}'
+    'cronEdit ${0:t} ${VERBOSE}'
   )
   windowTitle=(
     "Add Feed"
