@@ -3,7 +3,7 @@
 # Place the source tarball and the patch file in ${SOMEDIR}/rpmbuild/SOURCES
 # Grab a SHA256 sum of the tarball and place it in ${SOMEDIR}/rpmbuild/SOURCES/rdfetch-${VERSION}.tar.gz-sha256sum
 # Run rpmbuild -bb ${SOMEDIR}/rpmbuild/SPECS/rdfetch.spec
-# Run sudo yum install ${SOMEDIR}/rpmbuild/RPMS/noarch/rdfetch-${VERSION}-${RELEASE}.el7.noarch.rpm
+# Run sudo yum install ${SOMEDIR}/rpmbuild/RPMS/x86_64/rdfetch-${VERSION}-${RELEASE}.el7.x86_64.rpm
 Name: rdfetch
 # This package complies with Semantic Versioning: http://semver.org/
 %define vMajor 0

@@ -93,8 +93,8 @@ rpm:	dist
 	mkdir -p $(HOME)/rpmbuild/SOURCES
 	cp rdfetch-$(VERSION).tar.gz $(HOME)/rpmbuild/SOURCES/
 	sha256sum $(HOME)/rpmbuild/SOURCES/rdfetch-$(VERSION).tar.gz > $(HOME)/rpmbuild/SOURCES/rdfetch-$(VERSION).tar.gz.sha256
-	$(RPMBUILD) -ba --target noarch-$(VENDOR)-linux rdfetch.spec
-	mv $(HOME)/rpmbuild/RPMS/noarch/rdfetch-*.rpm $(top_srcdir)/
+	$(RPMBUILD) -ba --target x86_64-$(VENDOR)-linux rdfetch.spec
+	mv $(HOME)/rpmbuild/RPMS/x86_64/rdfetch-*.rpm $(top_srcdir)/
 	mv $(HOME)/rpmbuild/SRPMS/rdfetch-*.src.rpm $(top_srcdir)/
 	rm $(HOME)/rpmbuild/SOURCES/rdfetch-$(VERSION).tar.gz
 
