@@ -1307,11 +1307,11 @@ function createDropbox() {
 # Return 0 ("success") for a "yes"-like response and 1 ("non-success")
 # for a "no"-like response to the given prompt.
 function getYesNo() {
-  local -r prompt="${1}"
+  local -r our_prompt="${1}"
 
   local response=''
   until [[ "${(L)response}" =~ ^(no*|y(es)*)$ ]] ; do
-    echo "${prompt} [y or n] \c" > /dev/tty
+    echo "${our_prompt} [y or n] \c" > /dev/tty
     # response is actually used, but in a non-Bash way, see below.
     # shellcheck disable=SC2034
     read response < /dev/tty
