@@ -81,7 +81,5 @@ fi
 %attr(-,%{rduser},%{rduser}) %{homerd}/rdfetch
 
 %changelog
-* Mon Aug 24 2020 David Klann <dklann@broadcasttool.com> - %{vMajor}.%{vMinor}.%{vPatch}-1
+* Mon Aug 24 2020 David Klann <dklann@broadcasttool.com>
 - Created.
-* Sun Mar 28 2021 David Klann <dklann@broadcasttool.com> - %{vMajor}.%{vMinor}.%{vPatch}-1
-- standards updates to zsh-functions.in - shellcheck, etc.
