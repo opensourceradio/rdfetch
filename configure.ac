@@ -43,6 +43,11 @@ else
   AC_SUBST(LOCAL_PREFIX,${prefix})
 fi
 
+#
+# Basic Compiler Checks
+#
+AC_PROG_CC
+
 # Rdfetch specifics, we prefer /home/rd/rdfetch/configuration
 # for all the rdfetch configuration and notification
 # stuff.
