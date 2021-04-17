@@ -24,6 +24,10 @@ dist_bin_SCRIPTS = rdfetch \
                    podget-wrapper \
                    zsh-functions
 
+bin_PROGRAMS = sendusr1
+
+dist_sendusr1_SOURCES = sendusr1.c
+
 man_MANS = rdfetch.1
 
 ACLOCAL_AMFLAGS = -I m4
