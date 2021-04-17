@@ -30,7 +30,7 @@ zmodload zsh/datetime
   vLibRelease=0
   vLibMajor=0
   vLibMinor=2
-  vLibPatch=10
+  vLibPatch=11
   vLibHash='$Hash$'
 }
 function zsh_library_version() {

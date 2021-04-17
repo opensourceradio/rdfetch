@@ -8,11 +8,11 @@ Name: rdfetch
 # This package complies with Semantic Versioning: http://semver.org/
 %define vMajor 0
 %define vMinor 4
-%define vPatch 1
+%define vPatch 2
 Version: %{vMajor}.%{vMinor}.%{vPatch}
 Release: @RPM_RELEASE@%{?dist}
 Summary: A Rivendell podcast fetcher
-BuildArch: noarch
+BuildArch: x86_64
 License: GPLv3
 Group: Productivity/Multimedia/Other
 URL: https://github.com/opensourceradio/%{name}
