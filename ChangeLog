@@ -11,3 +11,5 @@
 	* Fix path to podget-wrapper in cron setup
 	* Add menu option to clear ALL dropbox log files
 	* Simplify output of dropbox check if fewer than 20 dropboxes
+2021-04-17 David Klann <dklann@broadcasttool.com>
+	* Bump the PACKAGE_VERSION
