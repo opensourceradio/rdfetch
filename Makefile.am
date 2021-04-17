@@ -141,6 +141,7 @@ uninstall-local:
 edit = sed \
           -e  's|QQQbindirQQQ|$(bindir)|g' \
           -e  's|QQQprefixQQQ|$(prefix)|g' \
+          -e  's|QQQdatadirQQQ|$(datadir)|g' \
           -e  's|QQQHOMERDQQQ|$(HOMERD)|g'
 
 zsh-functions rdfetch.desktop:	Makefile
