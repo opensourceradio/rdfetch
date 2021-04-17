@@ -10,7 +10,7 @@ Name: rdfetch
 %define vMinor 4
 %define vPatch 1
 Version: %{vMajor}.%{vMinor}.%{vPatch}
-Release: 1%{?dist}
+Release: @RPM_RELEASE@%{?dist}
 Summary: A Rivendell podcast fetcher
 BuildArch: noarch
 License: GPLv3
