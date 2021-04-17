@@ -930,7 +930,13 @@ function rdDropboxStatus() {
 
       logit "${myName}" "${interactive}" "${count} of ${totalCount} Rivendell dropboxes are running. Restarting $((rdcatchdRestartNeeded)) Rivendell dropboxes...${interactive:+ \\c}"
 
-      ${KILLALL} 'rdcatchd'
+      if rdservicePID=$(${PIDOF} 'rdservice') ; then
+	if ! ${SENDUSR1} "${rdservicePID}" ; then
+	  logit ${myName} ${interactive} "Unable to send SIGUSR1 to rdservice. Please contact someone who can help."
+	fi
+      else
+	${KILLALL} 'rdcatchd'
+      fi
 
       # Wait a few seconds to see if anybody restarts rdcatchd.
       if (( interactive )) ; then

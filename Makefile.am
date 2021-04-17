@@ -94,7 +94,7 @@ rpm:	dist
 	mv $(HOME)/rpmbuild/SRPMS/rdfetch-*.src.rpm $(top_srcdir)/
 	rm $(HOME)/rpmbuild/SOURCES/rdfetch-$(VERSION).tar.gz
 
-install-exec-am:	rdfetch.1 rdfetch.pdf rdfetch.html rdfetch podget-wrapper
+install-exec-am:	rdfetch.1 rdfetch.pdf rdfetch.html rdfetch podget-wrapper sendusr1
 	mkdir -p $(DESTDIR)@HOMERD@/rdfetch/log/archive
 	mkdir -p $(DESTDIR)@HOMERD@/rdfetch/configuration
 	mkdir -p $(DESTDIR)@HOMERD@/rdfetch/podcasts
@@ -110,6 +110,7 @@ install-exec-am:	rdfetch.1 rdfetch.pdf rdfetch.html rdfetch podget-wrapper
 	cp -p rdfetch $(DESTDIR)@bindir@
 	cp -p podget-wrapper $(DESTDIR)@bindir@
 	cp -p zsh-functions $(DESTDIR)@bindir@
+	cp -p sendusr1 $(DESTDIR)@bindir@
 
 	mkdir -p $(DESTDIR)@sysconfdir@/xdg/menus/applications-merged
 	cp rdfetch-rivendell.menu $(DESTDIR)@sysconfdir@/xdg/menus/applications-merged/
@@ -124,6 +125,7 @@ uninstall-local:
 	rm -f $(DESTDIR)@bindir@/rdfetch
 	rm -f $(DESTDIR)@bindir@/podget-wrapper
 	rm -f $(DESTDIR)@bindir@/zsh-functions
+	rm -f $(DESTDIR)@bindir@/sendusr1
 	-rmdir $(DESTDIR)@prefix@/bin
 
 	rm -f $(DESTDIR)@datadir@/applications/rdfetch.desktop

@@ -55,6 +55,9 @@ dropbox configurator wizard.
 if [ -x %{_bindir}/gtk-update-icon-cache ] ; then
   %{_bindir}/gtk-update-icon-cache -f --quiet %{_datadir}/icons/gnome  || :
 fi
+if [ -x %{_bindir}/sendusr1 ] ; then
+  setcap "cap_kill=+ep" %{_bindir}/sendusr1
+fi
 
 %postun
 if [ -x %{_bindir}/gtk-update-icon-cache ] ; then
@@ -67,6 +70,7 @@ fi
 %{_bindir}/%{name}
 %{_bindir}/podget-wrapper
 %{_bindir}/zsh-functions
+%{_bindir}/sendusr1
 %{_datadir}/icons/gnome/scalable/apps/%{name}.svg
 %{_datadir}/applications/%{name}.desktop
 %{_sysconfdir}/xdg/menus/applications-merged/rdfetch-rivendell.menu
