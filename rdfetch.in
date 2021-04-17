@@ -1436,7 +1436,7 @@ done
 ##########################################################################################
 
 typeset -a menu command windowTitle
-typeset -iR 2 count
+typeset -i -R 2 count
 typeset choice
 
 while : ; do
