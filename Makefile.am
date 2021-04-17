@@ -160,6 +160,7 @@ rdfetch.desktop:	$(srcdir)/rdfetch.desktop.in
 ##
 ## Build Dependencies
 ##
+sendusr1:	sendusr1.c
 %.html:	%.xml
 	xsltproc -o $@ $(DOCBOOK_STYLESHEETS)/xhtml/docbook.xsl $<
 %.pdf:	%.xml
