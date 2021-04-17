@@ -854,10 +854,10 @@ function rdDropboxStatus() {
   local verbose="${1}"
 
   ############ BEGIN external shell commands used in this function. ############
-  # This function uses these 10 external commands.
+  # This function uses these 11 external commands.
   # Look for them in their upper case, parameter expanded form.
   typeset -a our_commands
-  our_commands=( awk grep hostname killall pidof ps rdcatchd sed sleep sort )
+  our_commands=( awk grep hostname killall pidof ps rdcatchd sed sendusr1 sleep sort )
   # Find the executables we need; this uses some basic shell and a ZSH trick:
   # the (U) in the eval says to evaluate the parameter as all upper case
   # letters. This snippet generates shell parameters representing the upper case
