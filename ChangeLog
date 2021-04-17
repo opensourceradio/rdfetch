@@ -7,3 +7,7 @@
 	* usage() cleanup
 	* internal cleanup
 	* do not trap SIGHUP so people can simply [X] the window
+2021-04-17 David Klann <dklann@broadcasttool.com>
+	* Fix path to podget-wrapper in cron setup
+	* Add menu option to clear ALL dropbox log files
+	* Simplify output of dropbox check if fewer than 20 dropboxes

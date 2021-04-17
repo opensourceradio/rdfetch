@@ -35,8 +35,8 @@ colors
 
 # This script complies with Semantic Versioning: http://semver.org/
 vMajor=
-vMinor=3
-vPatch=9
+vMinor=4
+vPatch=1
 vHash='$Hash$'
 
 # Get zsh functions necessary for this script.
@@ -669,7 +669,8 @@ function showRDimportLogs() {
 # Zero out (delete the contents of) the specified rdimport log file.
 function clearRDimportLog() {
   local -r myName=${1} ; shift
-  local -r verbose=${1}
+  local -r verbose=${1} ; shift
+  local -r clear_all=${1}
 
   local returnValue=0
   local -a logFiles
@@ -681,6 +682,23 @@ function clearRDimportLog() {
   # when setting array variable
   # shellcheck disable=SC2207
   logFiles=( $(${FIND} ${DIR_LIBRARY} -name rdimport.log -size +1 -printf '%p:%s\n' | ${SORT}) )
+
+  # Clear *all* the log files if so desired.
+  if [[ -n "${clear_all}" ]] ; then
+    echo "Clearing ALL dropbox log files \c"
+    local -i c=1
+    for f in ${logFiles[*]} ; do
+      [[ -w "${f%:*}" ]] || { echo "Cannot write to log File '${f%:*}'." ; continue ; }
+      ${CP} /dev/null "${f%:*}"
+      printf "."
+      ((c++ % 50 == 0)) && echo
+    done
+    echo "\nDone. \c"
+    read -q foo\?"Press <Enter> to return to the menu. "
+    trap -
+    return ${returnValue}
+  fi
+
 
   if [[ -n "${logFiles[*]}" ]] ; then
     echo "\nHere are all the rdimport log files I could find in '${DIR_LIBRARY}':"
@@ -760,9 +778,9 @@ EOF
   ${FMT} <<EOF
 
 
-${(C)myName} runs the 'podget-wrapper' back-end periodically in order to check for new episodes of podcasts. I check all podcasts each time, downloading new episodes for each podcast as they appear.
+${(C)myName} runs the 'podget-wrapper' back-end periodically in order to check for new episodes of podcasts. podget-wrapper checks all podcasts each time, downloading new episodes for each podcast as they appear.
 
-Typically, 'podget-wrapper' runs from the system job scheduler at least once an hour every day. I'll assume you want to do that. You will need to update the cron job manually (using the 'crontab' command) only if you want a different schedule.
+Typically, 'podget-wrapper' runs from the system job scheduler once an hour every day. I'll assume you want to do that. You will need to update the cron job manually (using the 'crontab' command) only if you want a different schedule.
 
 Valid hours are 0 - 23 and '*' (every hour).
 
@@ -783,7 +801,7 @@ EOF
 
     ${FMT} <<EOF
 
-Now I need to know how many times an hour you want to check for new podcasts. You can enter a single "minute" representing once an hour, or you can enter multiple minutes separated with commas (','). Valid minutes are 0 - 59.
+Now I need to know how many times an hour you want to check for new podcasts. You can enter a single "minute" representing that minute of each hour, or you can enter multiple minutes separated with commas (','). Valid minutes are 0 - 59.
 
 EOF
 
@@ -813,7 +831,7 @@ EOF
 
   (
     ${GREP} -v 'podget-wrapper' <<<${crontab}
-    echo "${minute} ${hour} * * * zsh /usr/local/bin/podget-wrapper"
+    echo "${minute} ${hour} * * * zsh @bindir@/podget-wrapper"
   ) | ${CRONTAB} -
 
   ${CAT} <<EOF
@@ -1442,6 +1460,7 @@ while : ; do
     "Show most recent podget diagnostic status"
     "Show rdimport log files"
     "Clear one rdimport log file"
+    "Clear ALL rdimport log files"
     "View and set the podget run schedule \(crontab\)"
     "Show Rivendell dropboxes"
     "Show Rivendell dropbox status"
@@ -1459,6 +1478,7 @@ while : ; do
     'showLastStatus ${0:t} err ${VERBOSE}'
     'showRDimportLogs ${0:t} ${VERBOSE}'
     'clearRDimportLog ${0:t} ${VERBOSE}'
+    'clearRDimportLog ${0##*/} ${VERBOSE} all'
     'editSchedule ${0:t} ${VERBOSE}'
     'showRDDropboxes ${0:t} ${VERBOSE}'
     'showDropboxStatus ${0:t} ${VERBOSE}'
@@ -1476,6 +1496,7 @@ while : ; do
     "podget Diagnostic Status"
     "Viewing rdimport Logs"
     "Clearing rdimport Log"
+    "Clearing ALL rdimport Logs"
     "Edit run Schedule"
     "Rivendell Dropboxes"
     "Rivendell Dropbox Status"
