@@ -24,7 +24,7 @@ dnl
 
 AC_PREREQ([2.69])
 
-AC_INIT([rdfetch],m4_esyscmd(cat PACKAGE_VERSION))
+AC_INIT([rdfetch],m4_esyscmd_s(cat PACKAGE_VERSION))
 AM_INIT_AUTOMAKE
 
 AC_SUBST(RPM_RELEASE,1)
