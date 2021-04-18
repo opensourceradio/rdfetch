@@ -36,7 +36,7 @@ colors
 # This script complies with Semantic Versioning: http://semver.org/
 vMajor=
 vMinor=4
-vPatch=3
+vPatch=4
 vHash='$Hash$'
 
 # Get zsh functions necessary for this script.
@@ -133,14 +133,14 @@ function addOrReplaceFeed() {
   ## (link retrieved Tue Aug 9 11:27:36 CDT 2016)
   ##########################################################################################
   feedTitle=$(${XSLTPROC} ${titleParserXSL} "${urlWithCredentials:-${feedURL}}" 2>/dev/null ||
-		 ${WGET} -q "${urlWithCredentials:-${feedURL}}" -O - | ${GREP} -m 1 '<title>' | ${SED} -e 's,^ *<title>\(.*\)</title>.*$,\1,')
+                 ${WGET} -q "${urlWithCredentials:-${feedURL}}" -O - | ${GREP} -m 1 '<title>' | ${SED} -e 's,^ *<title>\(.*\)</title>.*$,\1,')
   if [[ -z "${feedTitle}" ]] ; then
 
     # Try it without the username and password.
     if [[ -n "${urlWithCredentials}" ]] ; then
 
       feedTitle=$(${XSLTPROC} ${titleParserXSL} "${feedURL}" 2>/dev/null ||
-		     ${WGET} -q "${feedURL}" -O - | ${GREP} -m 1 '<title>' | ${SED} -e 's,^ *<title>\(.*\)</title>.*$,\1,')
+                     ${WGET} -q "${feedURL}" -O - | ${GREP} -m 1 '<title>' | ${SED} -e 's,^ *<title>\(.*\)</title>.*$,\1,')
 
     else
 
@@ -264,12 +264,12 @@ EOF
 
       # We made a tmpfile, so replace serverlist with its contents.
       ${MV} ${tmpfile} ${DIR_CONFIG}/${CONFIG_SERVERLIST} ||
-	return "$(error 'Could not replace ${DIR_CONFIG}/${CONFIG_SERVERLIST}.')"
+        return "$(error 'Could not replace ${DIR_CONFIG}/${CONFIG_SERVERLIST}.')"
 
       ${CHMOD} 644 ${DIR_CONFIG}/${CONFIG_SERVERLIST}
 
       ${MKDIR} -p ${DIR_LIBRARY}/${group}/${feedName} ||
-	warning "Failed to create new podcast directory ${DIR_LIBRARY}/${group}/${feedName} (${?}). You may have to create this yourself."
+        warning "Failed to create new podcast directory ${DIR_LIBRARY}/${group}/${feedName} (${?}). You may have to create this yourself."
 
       echo
 
@@ -279,18 +279,18 @@ EOF
       ##########################################################################################
       if addRDDropbox ${myName} ${DIR_LIBRARY} ${feedName} ${group} ${verbose} ; then
 
-	# Second arg indicates we are calling rdDropboxStatus interactively.
-	rdDropboxStatus ${myName} 1 ${verbose}
+        # Second arg indicates we are calling rdDropboxStatus interactively.
+        rdDropboxStatus ${myName} 1 ${verbose}
 
-	##########################################################################################
-	## Also offer to create a Rivendell Event.
-	##########################################################################################
-	if getYesNo "Do you want to also create an new Event for this feed?" ; then
-	  echo
-	  if ! addSimpleEvent ${myName} "${feedName}" 1 ${verbose} ; then
-	    printf "Sorry. I could not create a new event for %s\n" "${feedName}"
-	  fi
-	fi
+        ##########################################################################################
+        ## Also offer to create a Rivendell Event.
+        ##########################################################################################
+        if getYesNo "Do you want to also create an new Event for this feed?" ; then
+          echo
+          if ! addSimpleEvent ${myName} "${feedName}" ${verbose} ; then
+            printf "Sorry. I could not create a new event for %s\n" "${feedName}"
+          fi
+        fi
 
       fi
 
@@ -344,11 +344,11 @@ function enableFeed() {
       # Allow '*'-style wildcards in the feedName, will expand it below.
       until feedName=$(${GREP} -i "^${feedNameEntered//\*/.*}$" <<< ${feedList}) ; do
 
-	warning "'${feedNameEntered}' is not in the list. Please use a valid feed name."
+        warning "'${feedNameEntered}' is not in the list. Please use a valid feed name."
 
-	echo "Current list of disabled podcast feeds:"
-	${COLUMN} -x -c $(( COLUMNS > 80 ? 78 : COLUMNS )) <<< ${feedList}
-	read feedNameEntered\?"Type or paste the name of the podcast ('*' wildcard OK) you want to enable: "
+        echo "Current list of disabled podcast feeds:"
+        ${COLUMN} -x -c $(( COLUMNS > 80 ? 78 : COLUMNS )) <<< ${feedList}
+        read feedNameEntered\?"Type or paste the name of the podcast ('*' wildcard OK) you want to enable: "
 
       done
 
@@ -358,8 +358,8 @@ function enableFeed() {
       feedName=${feedList}
       read ok\?"Press 'y' to enable the feed '${feedName}', or any other key to cancel: "
       if [[ "${ok}" != 'y' ]] ; then
-	trap -
-	return
+        trap -
+        return
       fi
       echo
 
@@ -379,16 +379,16 @@ function enableFeed() {
       group=$(${AWK} "/[[:space:]]${feedName}[[:space:]]*/{print \$2}" ${DIR_CONFIG}/${CONFIG_SERVERLIST})
 
       if [[ ! -d ${DIR_LIBRARY}/${group}/${feedName} ]] ; then
-	${MKDIR} -p ${DIR_LIBRARY}/${group}/${feedName} ||
-	  warning "Failed to create new podcast directory ${DIR_LIBRARY}/${group}/${feedName} (${?}). You may have to create this yourself."
+        ${MKDIR} -p ${DIR_LIBRARY}/${group}/${feedName} ||
+          warning "Failed to create new podcast directory ${DIR_LIBRARY}/${group}/${feedName} (${?}). You may have to create this yourself."
       fi
 
       # Offer to create a Rivendell dropbox if we are making changes
       # to this podcast (new or replace).
       if addRDDropbox ${myName} ${DIR_LIBRARY} ${feedName} ${group} ${verbose} ; then
 
-	# Second arg indicates we are calling rdDropboxStatus interactively.
-	rdDropboxStatus ${myName} 1 ${verbose}
+        # Second arg indicates we are calling rdDropboxStatus interactively.
+        rdDropboxStatus ${myName} 1 ${verbose}
 
       fi
       echo "Done."
@@ -490,24 +490,24 @@ function deleteFeed() {
 
     if [[ -s ${tmpfile} ]] ; then
       if ${MV} ${tmpfile} ${DIR_CONFIG}/${CONFIG_SERVERLIST} ; then
-	echo "Done."
+        echo "Done."
 
-	if getYesNo "Do you want to delete the dropbox for this feed too?" ; then
-	  echo
-	  if cleanupFeed ${myName} ${group} ${feedName} ${verbose} ; then
-	    if deleteRDDropbox ${myName} ${DIR_LIBRARY}/${group}/${feedName} ${verbose} ; then
-	      echo "Purged dropbox for feed '${feedName}'."
-	    else
-	      warning "Unable to successfully delete the dropbox for feed '${feedName}'. Please consult a professional."
-	    fi
-	  else
-	    warning "Unable to successfully clean up the cruft lying about for feed '${feedName}' (${?}). Please report this number to the authorities."
-	  fi
-	else
-	  echo "\nOK. Not deleting the dropbox for feed '${feedName}'."
-	fi
+        if getYesNo "Do you want to delete the dropbox for this feed too?" ; then
+          echo
+          if cleanupFeed ${myName} ${group} ${feedName} ${verbose} ; then
+            if deleteRDDropbox ${myName} ${DIR_LIBRARY}/${group}/${feedName} ${verbose} ; then
+              echo "Purged dropbox for feed '${feedName}'."
+            else
+              warning "Unable to successfully delete the dropbox for feed '${feedName}'. Please consult a professional."
+            fi
+          else
+            warning "Unable to successfully clean up the cruft lying about for feed '${feedName}' (${?}). Please report this number to the authorities."
+          fi
+        else
+          echo "\nOK. Not deleting the dropbox for feed '${feedName}'."
+        fi
       else
-	warning "Could not replace '${DIR_CONFIG}/${CONFIG_SERVERLIST}' with the deleted podcast feed. Do you have the access rights to replace this file? Please fix the file '${DIR_CONFIG}/${CONFIG_SERVERLIST}' manually."
+        warning "Could not replace '${DIR_CONFIG}/${CONFIG_SERVERLIST}' with the deleted podcast feed. Do you have the access rights to replace this file? Please fix the file '${DIR_CONFIG}/${CONFIG_SERVERLIST}' manually."
       fi
     else
       warning "Unable to find '${feedName}' in ${DIR_CONFIG}/${CONFIG_SERVERLIST}. Please fix the file ${DIR_CONFIG}/${CONFIG_SERVERLIST} manually."
@@ -549,15 +549,15 @@ function showFeeds() {
       ${GREP} -v '^ *$' |
       ${SORT} --ignore-case --key=3,3 --key=2,2 |
       while read url group title rest ; do
-	if [[ ${url} =~ ^#DISABLED#.* ]] ; then
-	  rdDropBoxPath="${RED}DISABLED:${NORM} RD dropbox: ${DIR_LIBRARY}/${group}/${title}/*.mp3"
-	  title="${RED}DISABLED:${NORM} ${title}"
-	  url="${RED}DISABLED:${NORM} ${url/\#DISABLED#/}"
-	else
-	  rdDropBoxPath="RD dropbox: ${DIR_LIBRARY}/${group}/${title}/*.mp3"
-	fi
+        if [[ ${url} =~ ^#DISABLED#.* ]] ; then
+          rdDropBoxPath="${RED}DISABLED:${NORM} RD dropbox: ${DIR_LIBRARY}/${group}/${title}/*.mp3"
+          title="${RED}DISABLED:${NORM} ${title}"
+          url="${RED}DISABLED:${NORM} ${url/\#DISABLED#/}"
+        else
+          rdDropBoxPath="RD dropbox: ${DIR_LIBRARY}/${group}/${title}/*.mp3"
+        fi
 
-	printf '%-46s %-16s %-48s\n%-80s\n%-80s\n\n' ${title} ${group} ${rest:-""} ${url} ${rdDropBoxPath}
+        printf '%-46s %-16s %-48s\n%-80s\n%-80s\n\n' ${title} ${group} ${rest:-""} ${url} ${rdDropBoxPath}
       done
 
     # The footer.
@@ -586,30 +586,30 @@ function showLastStatus() {
   if [[ -f ${statusFile} ]] ; then
     if [[ -r ${statusFile} ]] ; then
       if zstat -H statusStat ${statusFile} ; then
-	fileTime=$(strftime "%A, %B %d, %Y at %T" ${statusStat[mtime]})
+        fileTime=$(strftime "%A, %B %d, %Y at %T" ${statusStat[mtime]})
 
-	(
-	  # The header.
-	  reportTitleText="Latest RDFetch 'podget' ${(C)OUTPUT}"
-	  if [[ -n "${fileTime}" ]] ; then
-	    reportTitleText="${reportTitleText} as of ${fileTime}"
-	  fi
-	  # Center the title on the display.
-	  reportTitle="$(printf ' %.0s' {1..$(( (terminfo[cols] - ${#reportTitleText} ) / 2))})${BOLD}${reportTitleText}${NORM}"
-	  printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
-	  print "${reportTitle}"
-	  printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
+        (
+          # The header.
+          reportTitleText="Latest RDFetch 'podget' ${(C)OUTPUT}"
+          if [[ -n "${fileTime}" ]] ; then
+            reportTitleText="${reportTitleText} as of ${fileTime}"
+          fi
+          # Center the title on the display.
+          reportTitle="$(printf ' %.0s' {1..$(( (terminfo[cols] - ${#reportTitleText} ) / 2))})${BOLD}${reportTitleText}${NORM}"
+          printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
+          print "${reportTitle}"
+          printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
 
-	  # The data.
-	  ${CAT} ${statusFile}
+          # The data.
+          ${CAT} ${statusFile}
 
-	  # The footer.
-	  printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
-	) | ${LESS} -RCiP "Viewing the latest podget ${OUTPUT}?e (End of Output).\. Press <q> to quit, <PgDown> and <PgUP> to scroll, <g> to -Beginning-, <G> to -End-\."
+          # The footer.
+          printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
+        ) | ${LESS} -RCiP "Viewing the latest podget ${OUTPUT}?e (End of Output).\. Press <q> to quit, <PgDown> and <PgUP> to scroll, <g> to -Beginning-, <G> to -End-\."
 
       else
-	warning "Could not determine the time of last access of '${statusFile}' (${?}). Please seek professional help."
-	read ok\?"Press <Enter> to continue. "
+        warning "Could not determine the time of last access of '${statusFile}' (${?}). Please seek professional help."
+        read ok\?"Press <Enter> to continue. "
       fi
 
     else
@@ -641,9 +641,9 @@ function showRDimportLogs() {
   if [[ -n "${logFiles[*]}" ]] ; then
     for logfile in ${logFiles[*]} ; do
       if zstat -H logfileStat ${logfile} ; then
-	fileTime=$(strftime "%A, %B %d, %Y at %T" ${logfileStat[mtime]})
+        fileTime=$(strftime "%A, %B %d, %Y at %T" ${logfileStat[mtime]})
       else
-	fileTime=$(strftime "%A, %B %d, %Y at %T (unable to stat ${logfile})" ${EPOCHSECONDS})
+        fileTime=$(strftime "%A, %B %d, %Y at %T (unable to stat ${logfile})" ${EPOCHSECONDS})
       fi
       titleText="${logfile} as of ${fileTime}"
       # Center the title on the display.
@@ -654,12 +654,12 @@ function showRDimportLogs() {
 
       # The data (and make it pretty, please).
       if (( logfileStat[size] )) ; then
-	${SED} -r \
-	       -e "s/^(..-..-.... - ..:..:..)/${BOLD}\1${NORM}/" \
-	       -e "s/(error|skipping)/${BOLD}${RED}\1${NORM}/gi" \
-	       < ${logfile}
+        ${SED} -r \
+               -e "s/^(..-..-.... - ..:..:..)/${BOLD}\1${NORM}/" \
+               -e "s/(error|skipping)/${BOLD}${RED}\1${NORM}/gi" \
+               < ${logfile}
       else
-	echo "\n\t'${logfile}' is ${BOLD}${RED}EMPTY${NORM}.\n"
+        echo "\n\t'${logfile}' is ${BOLD}${RED}EMPTY${NORM}.\n"
       fi
 
       # The footer.
@@ -722,14 +722,14 @@ function clearRDimportLog() {
     chosenFile=${logFiles[${logfileIndex}]%:*}
     if [[ -w ${chosenFile} ]] ; then
       if read -q proceed\?"About to clear '${chosenFile}'. Press 'y' to continue, any other key to cancel " ; then
-	if ${CP} /dev/null ${chosenFile} ; then
-	  echo "\nCleared ${chosenFile}. "
-	else
-	  warning "Hmmmm... I encountered an error while trying to clear '${chosenFile}' (${?}). Please pass this number and message on to a professional."
-	  returnValue=2
-	fi
+        if ${CP} /dev/null ${chosenFile} ; then
+          echo "\nCleared ${chosenFile}. "
+        else
+          warning "Hmmmm... I encountered an error while trying to clear '${chosenFile}' (${?}). Please pass this number and message on to a professional."
+          returnValue=2
+        fi
       else
-	echo "\nDid NOT clear '${chosenFile}'. \c"
+        echo "\nDid NOT clear '${chosenFile}'. \c"
       fi
     else
       warning "No permission to clear '${chosenFile}'. Please contact the authorities."
@@ -750,16 +750,16 @@ function clearRDimportLog() {
 function addSimpleEvent() {
   local -r my_name=${1} ; shift
   local -r feed_name="${1}" ; shift
-  local -r interactive=${1} ; shift
   local -r verbose=${1}
 
+  local -i returnValue
   local cart_number cart_title
 
   if ! okDatabaseStructure "EVENTS:name,EVENT_LINES:event_name,cart_number,CART:number,title" ; then
-    returnValue="${?}"
+    returnValue=${?}
     error "${0}() (${zsh_eval_context}): This version of ${my_name} is not compatible with Rivendell database version $(rdDatabaseVersion). You need to manually add an Event."
     read ok\?"Press <Enter> to continue. "
-    return "${returnValue}"
+    return ${returnValue}
   fi
 
   # The Cart title will be the same as feed_name if they added a
@@ -804,7 +804,7 @@ function addSimpleEvent() {
     return 7
   fi
   trap -
-  IFS='	' # Just a <Tab>.
+  IFS=' ' # Just a <Tab>.
   # SC2046: This read is going to be word-split, but I am dealing with it.
   # shellcheck disable=SC2046
   if ! read -r cart_number event_name <<<$(doSQL "select CART_NUMBER, NAME from EVENTS join EVENT_LINES on NAME = EVENT_NAME where NAME = '${event_name}'") ; then
@@ -812,8 +812,36 @@ function addSimpleEvent() {
     return 8
   fi
 
-  logit "${my_name}" ${interactive} "Added new Event '${event_name}' choosing ${cart_number} as Pre-Import item."
-  return
+  logit "${my_name}" 1 "Added new Event '${event_name}' choosing ${cart_number} as Pre-Import item."
+}
+
+# Delete the Event event_name and its associated entries in
+# EVENT_LINES.
+function deleteSimpleEvent() {
+  local -r my_name=${1} ; shift
+  local -r event_name="${1}" ; shift
+  local -r verbose=${1}
+
+  if ! okDatabaseStructure "EVENTS:name,EVENT_LINES:event_name" ; then
+    error "${0}() (${zsh_eval_context}): This version of ${my_name} is not compatible with Rivendell database version $(rdDatabaseVersion). Please manually delete this Event."
+    read ok\?"Press <Enter> to continue. "
+    return 1
+  fi
+
+  # The two SQL DELETE statements want to be as atomic as
+  # possible. Ignore these signals.
+  trap '' 0 1 2 3
+
+  if ! doSQL "delete from EVENT_LINES where EVENT_NAME = '${event_name}'" ; then
+    warning "Trouble deleting Pre-Import items for Event '${event_name}'"
+  fi
+  if ! doSQL "delete from EVENTS where NAME = '${event_name}'" ; then
+    warning "Trouble deleting Event '${event_name}'. Please check this out."
+    trap -
+    return 2
+  fi
+  trap -
+  logit "${my_name}" 1 "Deleted Event '${event_name}'."
 }
 
 function editSchedule() {
@@ -975,7 +1003,7 @@ function addRDDropbox() {
   ##########################################################################################
   ## See whether there is a dropbox with a matching pathname.
   ##########################################################################################
-  oIFS="${IFS}" ; IFS='	'
+  oIFS="${IFS}" ; IFS=' '
   query="select d.ID,d.PATH,d.TO_CART,d.GROUP_NAME from DROPBOXES d where d.PATH like '${DIR_LIBRARY}/${feedGroup}/${feedName}/%'"
   # ShellCheck is a bit too aggressive in its quoting suggestions.
   # shellcheck disable=SC2046
@@ -1016,57 +1044,57 @@ function addRDDropbox() {
       # title as this feed.
       existingCartNumber=$(rdCartNumberFromTitle "${feedName}" ${verbose})
       if [[ -n "${existingCartNumber}" ]] ; then
-	if getYesNo "CART number '${existingCartNumber}' has the title '${feedName}'. Do you want to use this CART?" ; then
-	  dropboxCartNumber=${existingCartNumber}
-	fi
+        if getYesNo "CART number '${existingCartNumber}' has the title '${feedName}'. Do you want to use this CART?" ; then
+          dropboxCartNumber=${existingCartNumber}
+        fi
       elif getYesNo "Create a new CART and assign each '${feedName}' episode to it (one CART for all episodes)?" ; then
-	dropboxCartNumber=$(rdCreateEmptyCart ${feedGroup} ${feedName})
+        dropboxCartNumber=$(rdCreateEmptyCart ${feedGroup} ${feedName})
       else
-	if getYesNo "OK, do you want each '${feedName}' episode to be placed into its own (new) CART?" ; then
-	  dropboxCartNumber=0
-	else
-	  if getYesNo "OK, do you want to choose an existing CART number for episodes of '${feedName}'?" ; then
-	    unset dropboxCartGroup cartTitle
-	    until [[ "${feedGroup}" = "${dropboxCartGroup}" ]] ; do
-	      until [[ -n "${cartTitle}" ]] ; do
-		echo
-		read desiredNumber\?"Enter an existing CART number from group '${feedGroup}' to assign to this podcast feed: "
-		until [[ ${desiredNumber//[.,]/} =~ ^[[:digit:]]{1,6}$ ]] ; do
-		  read desiredNumber\?"Sorry, the CART number must be a number between 1 and 999999.
+        if getYesNo "OK, do you want each '${feedName}' episode to be placed into its own (new) CART?" ; then
+          dropboxCartNumber=0
+        else
+          if getYesNo "OK, do you want to choose an existing CART number for episodes of '${feedName}'?" ; then
+            unset dropboxCartGroup cartTitle
+            until [[ "${feedGroup}" = "${dropboxCartGroup}" ]] ; do
+              until [[ -n "${cartTitle}" ]] ; do
+                echo
+                read desiredNumber\?"Enter an existing CART number from group '${feedGroup}' to assign to this podcast feed: "
+                until [[ ${desiredNumber//[.,]/} =~ ^[[:digit:]]{1,6}$ ]] ; do
+                  read desiredNumber\?"Sorry, the CART number must be a number between 1 and 999999.
 Enter an existing CART number to assign to this podcast feed: "
-		done
-		cartTitle=$(rdCartTitleFromNumber ${desiredNumber//[.,]/} ${verbose})
-		if [[ -z "${cartTitle}" ]] ; then
-		  warning "There is no title for CART number '${desiredNumber//,/}'. Please try again."
-		fi
-	      done
+                done
+                cartTitle=$(rdCartTitleFromNumber ${desiredNumber//[.,]/} ${verbose})
+                if [[ -z "${cartTitle}" ]] ; then
+                  warning "There is no title for CART number '${desiredNumber//,/}'. Please try again."
+                fi
+              done
 
-	      dropboxCartNumber=${desiredNumber//[.,]/}
-	      dropboxCartGroup=$(rdCartGroupFromNumber ${dropboxCartNumber} ${verbose})
+              dropboxCartNumber=${desiredNumber//[.,]/}
+              dropboxCartGroup=$(rdCartGroupFromNumber ${dropboxCartNumber} ${verbose})
 
-	      if [[ "${feedGroup}" != "${dropboxCartGroup}" ]] ; then
-		warning "CART '${dropboxCartNumber}' ('${cartTitle}') is in GROUP '${dropboxCartGroup}' and you specified GROUP '${feedGroup}' for this feed. Please choose a CART from the GROUP '${feedGroup}'."
-		unset cartTitle desiredNumber dropboxCartNumber dropboxCartGroup
-	      else
-		read answer\?"OK. Using CART '${dropboxCartNumber}' ('${cartTitle}') for this feed. Press <Enter> to continue. "
-	      fi
-	    done
-	  else
-	    warning "Well, you're not assigning a specific cart to this podcast, and you're not using a new cart for each episode. You're on your own."
-	  fi
-	fi
+              if [[ "${feedGroup}" != "${dropboxCartGroup}" ]] ; then
+                warning "CART '${dropboxCartNumber}' ('${cartTitle}') is in GROUP '${dropboxCartGroup}' and you specified GROUP '${feedGroup}' for this feed. Please choose a CART from the GROUP '${feedGroup}'."
+                unset cartTitle desiredNumber dropboxCartNumber dropboxCartGroup
+              else
+                read answer\?"OK. Using CART '${dropboxCartNumber}' ('${cartTitle}') for this feed. Press <Enter> to continue. "
+              fi
+            done
+          else
+            warning "Well, you're not assigning a specific cart to this podcast, and you're not using a new cart for each episode. You're on your own."
+          fi
+        fi
       fi
 
       ##########################################################################################
       ## Actually create the new dropbox.
       ##########################################################################################
       if [[ -n "${dropboxCartNumber}" ]] ; then
-	if dropboxID=$(createDropbox ${feedGroup} ${feedName} ${DIR_LIBRARY} ${fileExt} ${dropboxCartNumber} ${verbose}) ; then
-	  echo "Dropbox number ${dropboxID} created."
-	  returnValue=0
-	else
-	  warning "Error creating dropbox for feed '${feedName}'. Please notify the authorities!"
-	fi
+        if dropboxID=$(createDropbox ${feedGroup} ${feedName} ${DIR_LIBRARY} ${fileExt} ${dropboxCartNumber} ${verbose}) ; then
+          echo "Dropbox number ${dropboxID} created."
+          returnValue=0
+        else
+          warning "Error creating dropbox for feed '${feedName}'. Please notify the authorities!"
+        fi
       fi
     else
       echo
@@ -1100,7 +1128,7 @@ function showRDDropboxes() {
   maxTitleLength=$(doSQL "select max(length(c.TITLE)) from DROPBOXES d join CART c on d.TO_CART = c.NUMBER where d.PATH like '${DIR_LIBRARY}/%'")
 
   (
-    IFS='	'
+    IFS='       '
     # The header (centered on the output device).
     reportTitleText="RDFetch-related (not all) Rivendell Dropboxes"
     reportTitle="$(printf ' %.0s' {1..$(( (terminfo[cols] - ${#reportTitleText} ) / 2))})${BOLD}${reportTitleText}${NORM}"
@@ -1114,7 +1142,7 @@ function showRDDropboxes() {
     doSQL "${query}" | while read id stationName boxpath group cart dropcuts title origin_datetime ; do
 
       if (( cart == 0 )) ; then
-	title='** New cart for each episode **'
+        title='** New cart for each episode **'
       fi
 
       printf "%3d %12s %-${maxPathLength}s %-12s %06d %3s  %-${maxTitleLength}s %-19s\\n" ${id} ${stationName} ${boxpath} ${group} ${cart} ${dropcuts} "${title}" "${origin_datetime}"
@@ -1160,10 +1188,10 @@ function deleteRDDropbox() {
     return "${returnValue}"
   fi
 
-  query="select ID,PATH,TO_CART from DROPBOXES where PATH like '${pathPrefix}%'"
+  query="select ID,TO_CART,PATH from DROPBOXES where PATH like '${pathPrefix}%'"
   # shellcheck disable=SC2046
-  read id boxpath cart <<<$(doSQL "${query}")
-  if (( cart )) ; then
+  read id cart boxpath <<<$(doSQL "${query}")
+  if ((cart)) ; then
     cartText="and imports the audio into CART ${cart}"
   else
     cartText="and creates a new cart for each episode"
@@ -1183,34 +1211,34 @@ EOF
     query="select ID from DROPBOXES where ID = ${id}"
     result=$(doSQL "${query}")
     if [[ -z "${result}" ]] ; then
-
-      echo "\nDropbox '${id}' successfully deleted"
-
+      print "\nDropbox '${id}' successfully deleted"
+      if ! rdResetDropbox "${myName}" ${id} 1 ${verbose} ; then
+        warning "Had trouble resetting dropbox ID ${id} (${?}). Make sure dropbox ID ${id} is gone."
+      fi
     else
-
-      echo "\nHmmmm... That dropbox (ID '${id}') is still in the Rivendell database. You should figure out what's going on."
+      print "\nHmmmm... That dropbox (ID '${id}') is still in the Rivendell database. You should figure out what's going on."
       returnValue=1
-
     fi
 
     if getYesNo "Do you also want to delete CART '${cart}' and its audio?" ; then
-
+      cartTitle="$(rdCartTitleFromNumber ${cart} ${verbose})"
       if message=$(rdDropCart ${cart} ${verbose}) ; then
-	echo "\nSuccessfully deleted CART '${cart}'."
+        echo "\nSuccessfully deleted CART '${cart}'."
+        if getYesNo "Do you also want to delete the Event for ${cartTitle}" ; then
+          if ! deleteSimpleEvent "${myName}" "${cartTitle}" ${verbose} ; then
+            warning "Had trouble deleting Event ${cartTitle}. Please look into this."
+          fi
+        else
+            print "OK, please manually delete Event '${cartTitle}' if you no longer need it."
+        fi
       else
-	warning "Unable to delete CART '${cart}' (${message})"
+        warning "Unable to delete CART '${cart}' (${message})"
       fi
-
     else
-
       warning "OK. But you may want consider deleting CART '${cart}'."
-
     fi
-
   else
-
     warning "Alright, but you will need to delete that dropbox yourself if you are done with it."
-
   fi
 
   return "${returnValue}"
@@ -1226,46 +1254,22 @@ function cleanupFeed() {
 
   local pathPrefix=${DIR_LIBRARY}/${group}/${feedName}
   local id
-  local returnValue=0
+  local -i returnValue=0
 
-  (( verbose )) && warning "${myName} (verbose): pathPrefix is '${pathPrefix}'."
+  ((verbose)) && warning "${myName} (verbose): pathPrefix is '${pathPrefix}'."
 
-  if id=$(rdGetDropboxIDFromPath ${myName} ${pathPrefix} 1 ${verbose:-0}) ; then
-
-    # There might not be a running instance of rdimport for this
-    # dropbox, especially if there is a problem with the dropbox.
-    rdimportPID=$(for PID in $(${PIDOF} rdimport) ; do
-		    ${GREP} -q --text "persistent-dropbox-id=${id}" /proc/${PID}/cmdline &&
-		      { echo ${PID} ; break ; }
-		  done)
-    if [[ -n "${rdimportPID}" ]] ; then
-
-      if ! kill ${rdimportPID} ; then
-	warning "Unable to stop process '${rdimportPID}'."
-      fi
-
-    fi
-
-    # Remove the dropbox directory.
-    if [[ -d ${pathPrefix} ]] ; then
-
-      ${RM} -rf ${pathPrefix}
-
-    else
-
-      warning "Dropbox path '${pathPrefix}' is not a directory. Please seek professional help."
-      returnValue=2
-
-    fi
-
-  else
-
+  if ! id=$(rdGetDropboxIDFromPath ${myName} "${pathPrefix}" 1 ${verbose}) ; then
     warning "ID returned from rdGetDropboxIDFromPath() was '${id}' for path '${pathPrefix}'."
-    returnValue=1
-
+    return 1
   fi
 
-  return "${returnValue}"
+  # Remove the dropbox directory.
+  if [[ -d "${pathPrefix}" ]] ; then
+    ${RM} -rf "${pathPrefix}"
+  else
+    warning "Dropbox path '${pathPrefix}' is not a directory. Please seek professional help."
+    return 2
+  fi
 }
 
 function makeParser() {
@@ -1278,14 +1282,14 @@ function makeParser() {
   ${CAT} > ${tmpfile} <<EOF
 <?xml version="1.0"?>
 <stylesheet version="1.0"
-	xmlns="http://www.w3.org/1999/XSL/Transform">
-	<output method="text"/>
-	<template match="/">
-		<apply-templates select="${selection}"/>
-	</template>
-	<template match="enclosure">
-		<value-of select="@url"/><text>&#10;</text>
-	</template>
+        xmlns="http://www.w3.org/1999/XSL/Transform">
+        <output method="text"/>
+        <template match="/">
+                <apply-templates select="${selection}"/>
+        </template>
+        <template match="enclosure">
+                <value-of select="@url"/><text>&#10;</text>
+        </template>
 </stylesheet>
 EOF
 
@@ -1338,11 +1342,11 @@ function createDropbox() {
 
       if [[ -z "${dropboxID}" ]] ; then
 
-	warning "Unable to discern the new dropbox ID. Did the dropbox get created?"
-	returnValue=1
+        warning "Unable to discern the new dropbox ID. Did the dropbox get created?"
+        returnValue=1
 
       else
-	echo ${dropboxID}
+        echo ${dropboxID}
       fi
 
     else
