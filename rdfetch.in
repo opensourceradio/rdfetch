@@ -36,7 +36,7 @@ colors
 # This script complies with Semantic Versioning: http://semver.org/
 vMajor=
 vMinor=4
-vPatch=2
+vPatch=3
 vHash='$Hash$'
 
 # Get zsh functions necessary for this script.
@@ -91,9 +91,9 @@ function addOrReplaceFeed() {
   local replaceFeed=0 addNewFeed=1
   local ok returnValue=0
 
-  if ! okDatabaseStructure GROUPS:name "${verbose}" ; then
+  if ! okDatabaseStructure "GROUPS:name+default_cart_type" "${verbose}" ; then
     returnValue="${?}"
-    echo "${0}() (${zsh_eval_context}): This version of ${myName} is not compatible with Rivendell database version '$(rdDatabaseVersion)'."
+    echo "${0}() (${zsh_eval_context}): This version of ${myName} is not compatible with Rivendell database version '$(rdDatabaseVersion)'. Cannot determine Groups"
     read ok\?"Press <Enter> to continue. "
     return "${returnValue}"
   fi
@@ -178,7 +178,6 @@ function addOrReplaceFeed() {
   ##########################################################################################
   ## Get the "category" for this podcast. Use a Rivendell GROUP for the category name.
   ##########################################################################################
-  # See zsh-functions for the definition of doSQL.
   rivendellGroupList=$(doSQL "select NAME from GROUPS where DEFAULT_CART_TYPE=1 order by NAME")
 
   # List the groups and prompt them for a group to use if they asked for
@@ -282,6 +281,16 @@ EOF
 
 	# Second arg indicates we are calling rdDropboxStatus interactively.
 	rdDropboxStatus ${myName} 1 ${verbose}
+
+	##########################################################################################
+	## Also offer to create a Rivendell Event.
+	##########################################################################################
+	if getYesNo "Do you want to also create an new Event for this feed?" ; then
+	  echo
+	  if ! addSimpleEvent ${myName} "${feedName}" 1 ${verbose} ; then
+	    printf "Sorry. I could not create a new event for %s\n" "${feedName}"
+	  fi
+	fi
 
       fi
 
@@ -736,6 +745,77 @@ function clearRDimportLog() {
   return "${returnValue}"
 }
 
+# Add a simple Event with the specified Cart number as the sole
+# Pre-Import item.
+function addSimpleEvent() {
+  local -r my_name=${1} ; shift
+  local -r feed_name="${1}" ; shift
+  local -r interactive=${1} ; shift
+  local -r verbose=${1}
+
+  local cart_number cart_title
+
+  if ! okDatabaseStructure "EVENTS:name,EVENT_LINES:event_name,cart_number,CART:number,title" ; then
+    returnValue="${?}"
+    error "${0}() (${zsh_eval_context}): This version of ${my_name} is not compatible with Rivendell database version $(rdDatabaseVersion). You need to manually add an Event."
+    read ok\?"Press <Enter> to continue. "
+    return "${returnValue}"
+  fi
+
+  # The Cart title will be the same as feed_name if they added a
+  # dropbox.
+  if ! cart_number="$(rdCartNumberFromTitle ${feed_name})" ; then
+    warning "Unable to get the Cart number for '${feed_name}'."
+    return 2
+    trap -
+  fi
+  if [[ -z "${cart_number}" ]] ; then
+    warning "No Cart number with title '${feed_name}'."
+    return 3
+  fi
+
+  # The two SQL INSERT statements want to be as atomic as
+  # possible. Ignore these signals.
+  trap '' 0 1 2 3
+
+  # Step 1: create the barebones event.
+  if ! doSQL "insert into EVENTS (NAME) values ('${feed_name}')" ; then
+    warning "Unable to create new Event named '${feed_name}' (${?})."
+    trap -
+    return 4
+  fi
+  if ! event_name=$(doSQL "select NAME from EVENTS where NAME = '${feed_name}'") ; then
+    warning "Unable to find new Event named '${feed_name}' (${?})."
+    trap -
+    return 5
+  fi
+  if [[ -z "${event_name}" ]] ; then
+    warning "New Event named ${feed_name} is missing its Event Name?? Please seek professional help."
+    trap -
+    return 6
+  fi
+  # Step 2: create an EVENT_LINES row with the Cart number as its sole
+  # item. EVENT_LINES.TYPE defaults to 0, Pre-Import item.
+  if ! doSQL "insert into EVENT_LINES (EVENT_NAME, CART_NUMBER) values ('${event_name}', ${cart_number})" ; then
+    warning "Unable to create new Pre-Import item with Cart number ${cart_number} for Event '${cart_title}' (${?})."
+    # Avoid leaving an orphaned Event lying around.
+    doSQL "delete from EVENTS where NAME = '${event_name}'"
+    trap -
+    return 7
+  fi
+  trap -
+  IFS='	' # Just a <Tab>.
+  # SC2046: This read is going to be word-split, but I am dealing with it.
+  # shellcheck disable=SC2046
+  if ! read -r cart_number event_name <<<$(doSQL "select CART_NUMBER, NAME from EVENTS join EVENT_LINES on NAME = EVENT_NAME where NAME = '${event_name}'") ; then
+    warning "Unable to find newly created Event for '${feed_name}' (${?})."
+    return 8
+  fi
+
+  logit "${my_name}" ${interactive} "Added new Event '${event_name}' choosing ${cart_number} as Pre-Import item."
+  return
+}
+
 function editSchedule() {
   local -r myName=${1} ; shift
   local -r verbose=${1}
@@ -895,8 +975,9 @@ function addRDDropbox() {
   ##########################################################################################
   ## See whether there is a dropbox with a matching pathname.
   ##########################################################################################
+  oIFS="${IFS}" ; IFS='	'
   query="select d.ID,d.PATH,d.TO_CART,d.GROUP_NAME from DROPBOXES d where d.PATH like '${DIR_LIBRARY}/${feedGroup}/${feedName}/%'"
-  # ShellCheck is just too aggressive on its quoting suggestions.
+  # ShellCheck is a bit too aggressive in its quoting suggestions.
   # shellcheck disable=SC2046
   read dropboxID dropboxPATH dropboxCARTNUM dropboxGROUP <<<$(doSQL "${query}")
   if (( dropboxID )) ; then
@@ -905,55 +986,38 @@ function addRDDropbox() {
     info="It appears as if Rivendell dropbox '${dropboxID}' watches for files at '${dropboxPATH}'."
 
     if (( dropboxCARTNUM )) ; then
-
-      query="select TITLE from CART where NUMBER = ${dropboxCARTNUM}"
-      # Keep shellcheck quiet about its quoting recommendation.
-      # shellcheck disable=SC2046
-      read cartTITLE <<<$(doSQL "${query}")
-
+      cartTITLE="$(rdCartTitleFromNumber ${dropboxCARTNUM} ${verbose})"
       info="${info} The dropbox uses the CART '${cartTITLE}' (number ${dropboxCARTNUM})."
-      # ShellCheck thinks quotes will not be respected in ${info}, but
-      # we know better.
-      # shellcheck disable=SC2090
-      ${FMT} <<<${info}
-
+      ${FMT} <<<"${info}"
     else
-
-      info="${info} This dropbox assigns new carts in group '${dropboxGROUP}'."
-
-      # See above.
-      # shellcheck disable=SC2090
-      ${FMT} <<<${info}
-
+      info="${info} This dropbox assigns new carts for each podcast episode in Group '${dropboxGROUP}'."
+      ${FMT} <<<"${info}"
     fi
 
     if getYesNo "Do you want to use this dropbox for the feed '${feedName}'?" ; then
-
       echo "OK, using existing dropbox."
       returnValue=0
-
     else
+      echo "OK, creating a new dropbox."
       createANewDropbox=1
     fi
   else
     createANewDropbox=1
   fi
+  IFS="${oIFS}"
 
   ##########################################################################################
   ## Create a new Rivendell dropbox
   ##########################################################################################
   if (( createANewDropbox )) ; then
-
     echo
     if getYesNo "Would you like to set up a Rivendell dropbox for '${feedName}'?" ; then
-
       # Offer to use an existing cart if it exists and has the same
       # title as this feed.
       existingCartNumber=$(rdCartNumberFromTitle "${feedName}" ${verbose})
       if [[ -n "${existingCartNumber}" ]] ; then
 	if getYesNo "CART number '${existingCartNumber}' has the title '${feedName}'. Do you want to use this CART?" ; then
 	  dropboxCartNumber=${existingCartNumber}
-
 	fi
       elif getYesNo "Create a new CART and assign each '${feedName}' episode to it (one CART for all episodes)?" ; then
 	dropboxCartNumber=$(rdCreateEmptyCart ${feedGroup} ${feedName})
@@ -971,12 +1035,10 @@ function addRDDropbox() {
 		  read desiredNumber\?"Sorry, the CART number must be a number between 1 and 999999.
 Enter an existing CART number to assign to this podcast feed: "
 		done
-
 		cartTitle=$(rdCartTitleFromNumber ${desiredNumber//[.,]/} ${verbose})
 		if [[ -z "${cartTitle}" ]] ; then
 		  warning "There is no title for CART number '${desiredNumber//,/}'. Please try again."
 		fi
-
 	      done
 
 	      dropboxCartNumber=${desiredNumber//[.,]/}
@@ -988,12 +1050,9 @@ Enter an existing CART number to assign to this podcast feed: "
 	      else
 		read answer\?"OK. Using CART '${dropboxCartNumber}' ('${cartTitle}') for this feed. Press <Enter> to continue. "
 	      fi
-
 	    done
 	  else
-
 	    warning "Well, you're not assigning a specific cart to this podcast, and you're not using a new cart for each episode. You're on your own."
-
 	  fi
 	fi
       fi
@@ -1010,10 +1069,8 @@ Enter an existing CART number to assign to this podcast feed: "
 	fi
       fi
     else
-
       echo
       echo "\nOK, you may want to add a Rivendell dropbox on your own so that the podcast episodes get imported."
-
     fi
   fi
 
@@ -1029,7 +1086,7 @@ function showRDDropboxes() {
 
   if ! okDatabaseStructure DROPBOXES:id+station_name+path+group_name+to_cart+delete_cuts,CART:number+title,CUTS:cart_number+origin_datetime "${verbose}" ; then
     returnValue="${?}"
-    error "${0}() (${zsh_eval_context}): This version of ${myName} is not compatible with Rivendell database version $(rdDatabaseVersion). You need to create a dropbox manually."
+    error "${0}() (${zsh_eval_context}): This version of ${myName} is not compatible with Rivendell database version $(rdDatabaseVersion). Cannot show dropboxes."
     read ok\?"Press <Enter> to continue. "
     return "${returnValue}"
   fi
@@ -1250,7 +1307,7 @@ function createDropbox() {
   local -a query
 
   if ! okDatabaseStructure DROPBOXES:station_name+group_name+path+normalization_level+autotrim_level+to_cart+delete_cuts+fix_broken_formats+log_path "${verbose}" ; then
-    echo "${0}() (${zsh_eval_context}): This version of ${0} is not compatible with Rivendell database version '$(rdDatabaseVersion)'."
+    echo "${0}() (${zsh_eval_context}): This version of ${0} is not compatible with Rivendell database version '$(rdDatabaseVersion)'. You need to create a dropbox manually."
     read ok\?"Press <Enter> to continue. "
     return 128
   fi
@@ -1488,22 +1545,22 @@ while : ; do
     'cronEdit ${0:t} ${VERBOSE}'
   )
   windowTitle=(
-    "Add Feed"
-    "Delete Feed"
-    "Enable Feed"
-    "List Feeds"
-    "podget Run Status"
-    "podget Diagnostic Status"
-    "Viewing rdimport Logs"
-    "Clearing rdimport Log"
-    "Clearing ALL rdimport Logs"
-    "Edit run Schedule"
-    "Rivendell Dropboxes"
-    "Rivendell Dropbox Status"
-    "Edit serverlist"
-    "Edit notifyrc"
-    "Edit mailer configuration"
-    "Edit crontab"
+    "rdfetch: Add Feed"
+    "rdfetch: Delete Feed"
+    "rdfetch: Enable Feed"
+    "rdfetch: List Feeds"
+    "rdfetch: podget Run Status"
+    "rdfetch: podget Diagnostic Status"
+    "rdfetch: Viewing rdimport Logs"
+    "rdfetch: Clearing rdimport Log"
+    "rdfetch: Clearing ALL rdimport Logs"
+    "rdfetch: Edit run Schedule"
+    "rdfetch: Rivendell Dropboxes"
+    "rdfetch: Rivendell Dropbox Status"
+    "rdfetch: Edit serverlist"
+    "rdfetch: Edit notifyrc"
+    "rdfetch: Edit mailer configuration"
+    "rdfetch: Edit crontab"
   )
 
   # Set the window title.

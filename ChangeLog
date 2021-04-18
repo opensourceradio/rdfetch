@@ -15,3 +15,6 @@
 	* Bump the PACKAGE_VERSION
 2021-04-17 David Klann <dklann@broadcasttool.com>
 	* Add support for Rivendell 3.X
+2021-04-18 David Klann <dklann@broadcasttool.com
+	* Fix rdimport/rdservice recovery process
+	* Add support for creating a new Event after creating a dropbox

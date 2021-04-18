@@ -30,7 +30,7 @@ zmodload zsh/datetime
   vLibRelease=0
   vLibMajor=0
   vLibMinor=2
-  vLibPatch=11
+  vLibPatch=12
   vLibHash='$Hash$'
 }
 function zsh_library_version() {
@@ -848,10 +848,12 @@ function rdCreateEmptyCart() {
   return "${returnValue}"
 }
 
+# Determine the dropbox status for all dropboxes on this host.
+# restarted.
 function rdDropboxStatus() {
-  local myName="${1}" ; shift
-  local interactive="${1}" ; shift
-  local verbose="${1}"
+  local -r myName="${1}" ; shift
+  local -r interactive="${1}" ; shift
+  local -r verbose="${1}"
 
   ############ BEGIN external shell commands used in this function. ############
   # This function uses these 11 external commands.
@@ -878,8 +880,9 @@ function rdDropboxStatus() {
 
   local -a dropboxIDs
   local -a rdimportIDs
-  local dropboxID dropboxPath rdcatchdRestartNeeded=0 returnValue=0
-  local count=0 totalCount=0
+  local -a dropboxesNotRunning
+  local -a extraneousRdimportPIDs
+  local dropboxID dropboxPath
 
   if ! okDatabaseStructure DROPBOXES:id+station_name+path "${verbose}" ; then
     echo "This version of ${0} is not compatible with Rivendell database version '$(rdDatabaseVersion)'."
@@ -888,99 +891,54 @@ function rdDropboxStatus() {
 
   # We are looking for dropboxes on *this* host.
   dropboxIDs=( $(doSQL "select ID from DROPBOXES where STATION_NAME = '$(${HOSTNAME} -s)' order by ID") )
-  # The list of IDs for all currently running rdimport processes.
-  rdimportIDs=(
-    $(
-      ${PS} ax --format 'pid,args' |
-	${AWK} '/\s?rdimport\s?/{print $3}' |
-	${SED} -e 's,--persistent-dropbox-id=,,' |
-	${SORT} -n
-    )
-  )
 
-  # Check each one if we found any dropbox IDs.
-  if (( ${#dropboxIDs} )) ; then
+  # We better have running rdimport processes if we have configured
+  # dropboxes.
+  # SC1009: shellcheck cannot handle this, it seems to be a ZSH-ism
+  # shellcheck disable=SC1009
+  if ((${#dropboxIDs})) ; then
+    # The list of dropbox IDs for all currently running rdimport
+    # processes (in numeric order).
+    rdimportIDs=( $(${PS} ax --format 'pid,args' |
+		      ${AWK} '/\s?rdimport\s?/{print $3}' |
+		      ${SED} -e 's,--persistent-dropbox-id=,,' |
+		      ${SORT} -n) )
+    # Get both the list of missing rdimport process IDs and the list
+    # of extraneous rdimport process IDs.
+    # SC2206: Because this is a ZSH array, I *want* words to be split.
+    # shellcheck disable=SC2206
+    dropboxesNotRunning=( ${dropboxIDs:|rdimportIDs} )
+    # shellcheck disable=SC2206
+    extraneousRdimportPIDs=( ${rdimportIDs:|dropboxIDs} )
 
-    # If not equal, we probably have more dropboxes than running
-    # instances of rdimport. (This is a map() in perl.)
-    for dropboxID in ${dropboxIDs} ; do
+    if [[ -n "${extraneousRdimportPIDs[*]}" ]] ; then
+      logit "${myName}" "${interactive}" "It seems you have one or more 'zombie' dropboxes running. Recommend killing these process IDs: ${(j:, :)extraneousRdimportPIDs}"
+    fi
 
+    if [[ -z "${dropboxesNotRunning[*]}" ]] ; then
+      logit "${myName}" "${interactive}" "Yay! All ${#dropboxIDs[*]} Rivendell dropboxes are currently active and running."
+      return
+    fi
+
+    # We have more configured dropboxes than running instances of
+    # rdimport. TODO: deal with more running rdimport processes than
+    # configured dropboxes.
+    for dropboxID in ${dropboxesNotRunning[*]} ; do
       dropboxPath=$(doSQL "select PATH from DROPBOXES where ID=${dropboxID}")
-
-      if ${GREP} -q "${dropboxID}" <<<${rdimportIDs[*]} ; then
-
-        if ((${#dropboxIDs} > 20)) ; then
-          print ".\c"
-          ((count > 0 && count % 50 == 0)) && echo
-        else
-	  logit ${myName} ${interactive} "Dropbox ${dropboxID} ('${dropboxPath}') is running."
-        fi
-	(( count++ ))
-
-      else
-
-	logit "${myName}" "${interactive}" "Dropbox ${dropboxID} ('${dropboxPath}') is not running. (Will restart rdcatchd.)"
-	(( rdcatchdRestartNeeded++ ))
-
-      fi
-      (( totalCount++ ))
+      logit ${myName} ${interactive} "$(printf 'Dropbox ID %d (path spec %s) is not running. Will reset this dropbox.' ${dropboxID} ${dropboxPath})"
+      rdResetDropbox "${myName}" ${dropboxID} ${interactive} ${verbose}
     done
 
-    if (( rdcatchdRestartNeeded )) ; then
-
-      logit "${myName}" "${interactive}" "${count} of ${totalCount} Rivendell dropboxes are running. Restarting $((rdcatchdRestartNeeded)) Rivendell dropboxes...${interactive:+ \\c}"
-
-      if rdservicePID=$(${PIDOF} 'rdservice') ; then
-	if ! ${SENDUSR1} "${rdservicePID}" ; then
-	  logit ${myName} ${interactive} "Unable to send SIGUSR1 to rdservice. Please contact someone who can help."
-	fi
-      else
-	${KILLALL} 'rdcatchd'
-      fi
-
-      # Wait a few seconds to see if anybody restarts rdcatchd.
-      if (( interactive )) ; then
-	for i in {1..3} ; do echo ".\c" ; ${SLEEP} 1; done
-      else
-	${SLEEP} 3
-      fi
-
-      if ! ${PIDOF} 'rdcatchd' > /dev/null ; then
-
-	${RDCATCHD}
-
-	# Wait a few seconds more to make sure rdcatchd restarts.
-	# SC2034: If only the shell had the equivalent of a value we don't care about...
-	# shellcheck disable=SC2034
-	if (( interactive )) ; then
-	  for i in {1..3} ; do echo ".\c" ; ${SLEEP} 1; done
-	else
-	  ${SLEEP} 3
-	fi
-
-	if ${PIDOF} 'rdcatchd' > /dev/null ; then
-
-	  logit "${myName}" "${interactive}" "Done."
-
-	else
-
-	  (( interactive )) && echo
-	  logit "${myName}" "${interactive}" "ERROR: Could not restart ${RDCATCHD}. Please contact a professional Rivendell authority!"
-	  returnValue=1
-
-	fi
+    if rdservicePID=$(${PIDOF} 'rdservice') ; then
+      if ! ${SENDUSR1} "${rdservicePID}" ; then
+	logit ${myName} ${interactive} "Unable to send SIGUSR1 to rdservice. Please contact someone who can help."
       fi
     else
-
-      logit "${myName}" "${interactive}" "Yay! ${count} of ${totalCount} Rivendell dropboxes are currently active and running."
-
+      logit ${myName} ${interactive} "Unable to discern the process ID of 'rdservice'. Please seek help from a higher authority..."
     fi
   else
-
     logit "${myName}" "${interactive}" "Found zero (0) dropboxes on this Rivendell workstation ('$(${HOSTNAME} -s)')."
-
   fi
-
 }
 
 # Return a DROPBOX numeric ID from a path.
@@ -1061,8 +1019,8 @@ function rdResetDropbox() {
 # table does not exist, or false (2) if a column is not found in the
 # table.
 function okDatabaseStructure() {
-  local tablesAndColumns="${1}" ; shift
-  local verbose="${1:-0}"
+  local -r tablesAndColumns="${1}" ; shift
+  local -r verbose="${1:-0}"
 
   local schema
 
@@ -1071,7 +1029,8 @@ function okDatabaseStructure() {
   local -r oIFS="${IFS}" ; IFS=' '
 
   # Split the comma-separated list of
-  # table:colum+column+column... into this ZSH associative array.
+  # table1:colum+column+column,table2:column+column... into this ZSH
+  # associative array.
   local -A tables
   tables=( $(echo ${${tablesAndColumns//,/ }//:/ }) )
 

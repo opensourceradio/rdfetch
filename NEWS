@@ -1,6 +1,13 @@
 The NEWS file for RDFetch.
 
 -------------------------------------------------------------------------------
+v0.4.3 -- 18 April 2021
+
+Changes:
+   Many fixes and improvements.
+   Support Rivendell 3.x dropbox reset and restart.
+   Add simple Event creation after successful dropbox creation.
+-------------------------------------------------------------------------------
 v0.3.7 -- 30 March 2021
 
 Changes:
