@@ -36,7 +36,7 @@ colors
 # This script complies with Semantic Versioning: http://semver.org/
 vMajor=
 vMinor=4
-vPatch=4
+vPatch=5
 vHash='$Hash$'
 
 # Get zsh functions necessary for this script.
@@ -755,7 +755,7 @@ function addSimpleEvent() {
   local -i returnValue
   local cart_number cart_title
 
-  if ! okDatabaseStructure "EVENTS:name,EVENT_LINES:event_name,cart_number,CART:number,title" ; then
+  if ! okDatabaseStructure "EVENTS:name,EVENT_LINES:event_name+cart_number,CART:number+title" ; then
     returnValue=${?}
     error "${0}() (${zsh_eval_context}): This version of ${my_name} is not compatible with Rivendell database version $(rdDatabaseVersion). You need to manually add an Event."
     read ok\?"Press <Enter> to continue. "
@@ -804,7 +804,7 @@ function addSimpleEvent() {
     return 7
   fi
   trap -
-  IFS=' ' # Just a <Tab>.
+  IFS='	' # Just a <Tab>.
   # SC2046: This read is going to be word-split, but I am dealing with it.
   # shellcheck disable=SC2046
   if ! read -r cart_number event_name <<<$(doSQL "select CART_NUMBER, NAME from EVENTS join EVENT_LINES on NAME = EVENT_NAME where NAME = '${event_name}'") ; then
@@ -1003,7 +1003,7 @@ function addRDDropbox() {
   ##########################################################################################
   ## See whether there is a dropbox with a matching pathname.
   ##########################################################################################
-  oIFS="${IFS}" ; IFS=' '
+  oIFS="${IFS}" ; IFS='	' # Just <Tab>
   query="select d.ID,d.PATH,d.TO_CART,d.GROUP_NAME from DROPBOXES d where d.PATH like '${DIR_LIBRARY}/${feedGroup}/${feedName}/%'"
   # ShellCheck is a bit too aggressive in its quoting suggestions.
   # shellcheck disable=SC2046
@@ -1128,7 +1128,7 @@ function showRDDropboxes() {
   maxTitleLength=$(doSQL "select max(length(c.TITLE)) from DROPBOXES d join CART c on d.TO_CART = c.NUMBER where d.PATH like '${DIR_LIBRARY}/%'")
 
   (
-    IFS='       '
+    IFS='	'
     # The header (centered on the output device).
     reportTitleText="RDFetch-related (not all) Rivendell Dropboxes"
     reportTitle="$(printf ' %.0s' {1..$(( (terminfo[cols] - ${#reportTitleText} ) / 2))})${BOLD}${reportTitleText}${NORM}"

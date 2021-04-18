@@ -30,7 +30,7 @@ zmodload zsh/datetime
   vLibRelease=0
   vLibMajor=0
   vLibMinor=2
-  vLibPatch=13
+  vLibPatch=14
   vLibHash='$Hash$'
 }
 function zsh_library_version() {
@@ -881,7 +881,7 @@ function rdDropboxStatus() {
   local -a dropboxIDs
   local -a rdimportIDs
   local -a dropboxesNotRunning
-  local -a extraneousRdimportPIDs
+  local -a extraneousRdimportIDs
   local dropboxID dropboxPath
 
   if ! okDatabaseStructure DROPBOXES:id+station_name+path "${verbose}" ; then
@@ -909,10 +909,10 @@ function rdDropboxStatus() {
     # shellcheck disable=SC2206
     dropboxesNotRunning=( ${dropboxIDs:|rdimportIDs} )
     # shellcheck disable=SC2206
-    extraneousRdimportPIDs=( ${rdimportIDs:|dropboxIDs} )
+    extraneousRdimportIDs=( ${rdimportIDs:|dropboxIDs} )
 
-    if [[ -n "${extraneousRdimportPIDs[*]}" ]] ; then
-      logit "${myName}" "${interactive}" "It seems you have one or more 'zombie' dropboxes running. Recommend killing these process IDs: ${(j:, :)extraneousRdimportPIDs}"
+    if [[ -n "${extraneousRdimportIDs[*]}" ]] ; then
+      logit "${myName}" "${interactive}" "It seems you have one or more 'zombie' dropboxes running. You should kill the processes for dropbox IDs: ${(j:, :)extraneousRdimportIDs}"
     fi
 
     if [[ -z "${dropboxesNotRunning[*]}" ]] ; then
@@ -930,7 +930,7 @@ function rdDropboxStatus() {
     done
 
     if rdservicePID=$(${PIDOF} 'rdservice') ; then
-      if ! ${SENDUSR1} "${rdservicePID}" ; then
+      if ! ${SENDUSR1} "${rdservicePID}" > /dev/null ; then
         logit ${myName} ${interactive} "Unable to send SIGUSR1 to rdservice. Please contact someone who can help."
       fi
     else
