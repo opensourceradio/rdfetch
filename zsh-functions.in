@@ -30,7 +30,7 @@ zmodload zsh/datetime
   vLibRelease=0
   vLibMajor=0
   vLibMinor=2
-  vLibPatch=14
+  vLibPatch=15
   vLibHash='$Hash$'
 }
 function zsh_library_version() {
@@ -856,10 +856,10 @@ function rdDropboxStatus() {
   local -r verbose="${1}"
 
   ############ BEGIN external shell commands used in this function. ############
-  # This function uses these 11 external commands.
+  # This function uses these 8 external commands.
   # Look for them in their upper case, parameter expanded form.
-  typeset -a our_commands
-  our_commands=( awk grep hostname killall pidof ps rdcatchd sed sendusr1 sleep sort )
+  local -a our_commands
+  our_commands=( awk hostname kill pidof ps sed sendusr1 sudo )
   # Find the executables we need; this uses some basic shell and a ZSH trick:
   # the (U) in the eval says to evaluate the parameter as all upper case
   # letters. This snippet generates shell parameters representing the upper case
@@ -867,6 +867,7 @@ function rdDropboxStatus() {
   # of the commands.
   # Refresh this segment in Emacs by marking the appropriate region (or the whole
   # buffer with C-xH) and replacing it with C-uM-|mk-ourCommands (shell-command-on-region).
+  local C D
   for C in ${our_commands[*]} ; do
     # shellcheck disable=SC2154 # ZSH: ${path} is set by the shell.
     for D in ${path} ; do
@@ -875,13 +876,14 @@ function rdDropboxStatus() {
     done
     [[ -x $(eval print \$"${(U)C//-/_}") ]] || { print "Cannot find ${C}! Done."; return 1 ; }
   done
-  unset our_commands
+  unset our_commands C D
   ############# END external shell commands used in this function. #############
 
   local -a dropboxIDs
   local -a rdimportIDs
   local -a dropboxesNotRunning
   local -a extraneousRdimportIDs
+  local -A rdimportPIDs
   local dropboxID dropboxPath
 
   if ! okDatabaseStructure DROPBOXES:id+station_name+path "${verbose}" ; then
@@ -901,18 +903,31 @@ function rdDropboxStatus() {
     # processes.
     rdimportIDs=( $(${PS} ax --format 'args' |
                       ${AWK} '/^\/usr\/bin\/rdimport\s?/{print $2}' |
-                      ${SED} -e 's,--persistent-dropbox-id=,,' |
-                      ${SORT} -n) )
+                      ${SED} -e 's,--persistent-dropbox-id=,,') )
+    # The same list *with* process IDs in an asssociatve arrray,
+    # indexed by dropbox ID.
+    rdimportPIDs=( $(${PS} ax --format 'pid,args' |
+                      ${AWK} '/^[[:digit:]]{1,}\s\/(usr\/)?bin\/rdimport\s?/{print $3 " " $1}' |
+                      ${SED} -e 's,--persistent-dropbox-id=,,') )
     # Get both the list of missing rdimport process IDs and the list
     # of extraneous rdimport process IDs.
-    # SC2206: Because this is a ZSH array, I *want* words to be split.
+    # SC2206: Because this are ZSH arrays, I *want* words to be split.
     # shellcheck disable=SC2206
     dropboxesNotRunning=( ${dropboxIDs:|rdimportIDs} )
     # shellcheck disable=SC2206
     extraneousRdimportIDs=( ${rdimportIDs:|dropboxIDs} )
 
     if [[ -n "${extraneousRdimportIDs[*]}" ]] ; then
-      logit "${myName}" "${interactive}" "It seems you have one or more 'zombie' dropboxes running. You should kill the processes for dropbox IDs: ${(j:, :)extraneousRdimportIDs}"
+      local -r es=$( ((${#extraneousRdimportIDs[*]} > 1)) && printf 'es')
+      local -r is_are=$( ((${#extraneousRdimportIDs[*]} > 1)) && printf 'is' || printf 'are')
+      local -i d
+      print "There ${is_are} ${#extraneousRdimportIDs[*]} 'zombie' dropbox${es} running."
+      if ((interactive)) && getYesNo "Would you like to attempt to terminate the process${es} now?" ; then
+        print "If prompted, type the password for '${USER}' (it will not be displayed for security purposes)"
+        for d in ${extraneousRdimportIDs[*]} ; do
+          ${SUDO} ${KILL} ${rdimportPIDs[${d}]}
+        done
+      fi
     fi
 
     if [[ -z "${dropboxesNotRunning[*]}" ]] ; then
@@ -940,6 +955,7 @@ function rdDropboxStatus() {
     logit "${myName}" "${interactive}" "Found zero (0) dropboxes on this Rivendell workstation ('$(${HOSTNAME} -s)')."
   fi
 }
+
 
 # Return a DROPBOX numeric ID from a path.
 # Parameters:

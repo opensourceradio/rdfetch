@@ -36,7 +36,7 @@ colors
 # This script complies with Semantic Versioning: http://semver.org/
 vMajor=0
 vMinor=4
-vPatch=9
+vPatch=10
 vHash='$Hash$'
 
 # Get zsh functions necessary for this script.
@@ -1419,10 +1419,10 @@ EOF
 ## Script main line
 ##########################################################################################
 
-############ BEGIN external shell commands used in this script. ############
+############# BEGIN external shell commands used in this script. #############
 # This script uses these 24 external commands.
 # Look for them in their upper case, parameter expanded form.
-typeset -a our_commands
+local -a our_commands
 our_commands=( awk cat chmod column cp crontab diff find fmt getopt grep hostname less mkdir mktemp mv nl podget rm sed sort wc wget xsltproc )
 # Find the executables we need; this uses some basic shell and a ZSH trick:
 # the (U) in the eval says to evaluate the parameter as all upper case
@@ -1431,6 +1431,7 @@ our_commands=( awk cat chmod column cp crontab diff find fmt getopt grep hostnam
 # of the commands.
 # Refresh this segment in Emacs by marking the appropriate region (or the whole
 # buffer with C-xH) and replacing it with C-uM-|mk-ourCommands (shell-command-on-region).
+local C D
 for C in ${our_commands[*]} ; do
   # shellcheck disable=SC2154 # ZSH: ${path} is set by the shell.
   for D in ${path} ; do
@@ -1439,8 +1440,8 @@ for C in ${our_commands[*]} ; do
   done
   [[ -x $(eval print \$"${(U)C//-/_}") ]] || { print "Cannot find ${C}! Done."; return 1 ; }
 done
-unset our_commands
-############# END external shell commands used in this script. #############
+unset our_commands C D
+############## END external shell commands used in this script. ##############
 
 # Set some defaults, and see below for more ways to set these.
 typeset DIR_CONFIG=@PODGET_DIR_CONFIG@
