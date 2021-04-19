@@ -34,9 +34,9 @@ autoload colors
 colors
 
 # This script complies with Semantic Versioning: http://semver.org/
-vMajor=
+vMajor=0
 vMinor=4
-vPatch=7
+vPatch=8
 vHash='$Hash$'
 
 # Get zsh functions necessary for this script.
@@ -1139,6 +1139,7 @@ function showRDDropboxes() {
   maxTitleLength=$(doSQL "select max(length(c.TITLE)) from DROPBOXES d join CART c on d.TO_CART = c.NUMBER where d.PATH like '${DIR_LIBRARY}/%'")
 
   (
+    local -r oIFS="${IFS}" ; IFS='	' # Just a <Tab>
     # The header (centered on the output device).
     reportTitleText="RDFetch-related (not all) Rivendell Dropboxes"
     reportTitle="$(printf ' %.0s' {1..$(( (terminfo[cols] - ${#reportTitleText} ) / 2))})${BOLD}${reportTitleText}${NORM}"
@@ -1149,14 +1150,12 @@ function showRDDropboxes() {
     { printf '-%.0s' {1..$((4+13+maxPathLength+13+7+5+maxTitleLength+20))}; print; }
 
     # The data.
-    local -r oIFS="${IFS}" ; IFS='	' # Just a <Tab>
     doSQL "${query}" | while read id stationName boxpath group cart dropcuts title origin_datetime ; do
       if (( cart == 0 )) ; then
         title='** New cart for each episode **'
       fi
       printf "%3d %12s %-${maxPathLength}s %-12s %06d %3s  %-${maxTitleLength}s %-19s\\n" ${id} ${stationName} ${boxpath} ${group} ${cart} ${dropcuts} "${title}" "${origin_datetime}"
     done
-    IFS="${oIFS}"
 
     # The footer.
     { printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print; }
