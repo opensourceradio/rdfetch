@@ -36,7 +36,7 @@ colors
 # This script complies with Semantic Versioning: http://semver.org/
 vMajor=
 vMinor=4
-vPatch=6
+vPatch=7
 vHash='$Hash$'
 
 # Get zsh functions necessary for this script.
@@ -752,6 +752,7 @@ function addSimpleEvent() {
   local -r feed_name="${1}" ; shift
   local -r verbose=${1}
 
+  local -r oIFS="${IFS}"
   local -i returnValue
   local cart_number cart_title
 
@@ -809,9 +810,11 @@ function addSimpleEvent() {
   # shellcheck disable=SC2046
   if ! read -r cart_number event_name <<<$(doSQL "select CART_NUMBER, NAME from EVENTS join EVENT_LINES on NAME = EVENT_NAME where NAME = '${event_name}'") ; then
     warning "Unable to find newly created Event for '${feed_name}' (${?})."
+    IFS="${oIFS}"
     return 8
   fi
 
+  IFS="${oIFS}"
   logit "${my_name}" 1 "Added new Event '${event_name}' choosing ${cart_number} as Pre-Import item."
 }
 
@@ -989,6 +992,7 @@ function addRDDropbox() {
   local -r feedGroup=${1} ; shift
   local -r verbose=${1}
 
+  local -r oIFS="${IFS}"
   local createANewDropbox=0
   local returnValue=1
   local desiredNumber dropboxCartNumber
@@ -1003,11 +1007,12 @@ function addRDDropbox() {
   ##########################################################################################
   ## See whether there is a dropbox with a matching pathname.
   ##########################################################################################
-  oIFS="${IFS}" ; IFS='	' # Just <Tab>
   query="select d.ID,d.PATH,d.TO_CART,d.GROUP_NAME from DROPBOXES d where d.PATH like '${DIR_LIBRARY}/${feedGroup}/${feedName}/%'"
   # ShellCheck is a bit too aggressive in its quoting suggestions.
   # shellcheck disable=SC2046
+  IFS='	' # Just <Tab>
   read dropboxID dropboxPATH dropboxCARTNUM dropboxGROUP <<<$(doSQL "${query}")
+  IFS="${oIFS}"
   if (( dropboxID )) ; then
     # We *want* the quotes to be treated literally.
     # shellcheck disable=SC2089
@@ -1032,7 +1037,6 @@ function addRDDropbox() {
   else
     createANewDropbox=1
   fi
-  IFS="${oIFS}"
 
   ##########################################################################################
   ## Create a new Rivendell dropbox
@@ -1109,7 +1113,7 @@ function showRDDropboxes() {
   local -r myName=${1} ; shift
   local -r verbose=${1}
 
-  local query="select d.ID,d.STATION_NAME,d.PATH,d.GROUP_NAME,d.TO_CART,d.DELETE_CUTS,c.TITLE,u.ORIGIN_DATETIME from DROPBOXES d join CART c on d.TO_CART = c.NUMBER left join CUTS u on c.NUMBER = u.CART_NUMBER where d.STATION_NAME = '$(hostname -s)' and d.PATH like '${DIR_LIBRARY}/%' order by d.PATH"
+  local query
   local id stationName boxpath group cart dropcuts title origin_datetime
 
   if ! okDatabaseStructure DROPBOXES:id+station_name+path+group_name+to_cart+delete_cuts,CART:number+title,CUTS:cart_number+origin_datetime "${verbose}" ; then
@@ -1118,6 +1122,13 @@ function showRDDropboxes() {
     read ok\?"Press <Enter> to continue. "
     return "${returnValue}"
   fi
+
+  # This query is broken up simply for readability.
+  query="select d.ID,d.STATION_NAME,d.PATH,d.GROUP_NAME,d.TO_CART,d.DELETE_CUTS,c.TITLE,u.ORIGIN_DATETIME from DROPBOXES as d"
+  query="${query} join CART as c on d.TO_CART = c.NUMBER"
+  query="${query} left join CUTS as u on c.NUMBER = u.CART_NUMBER"
+  query="${query} where d.STATION_NAME = '${HOSTNAME%%.*}'"
+  query="${query} and d.PATH like '${DIR_LIBRARY}/%' order by d.PATH"
 
   trap 'trap - 0 2 3 ; return ;' 0 2 3
 
@@ -1128,7 +1139,6 @@ function showRDDropboxes() {
   maxTitleLength=$(doSQL "select max(length(c.TITLE)) from DROPBOXES d join CART c on d.TO_CART = c.NUMBER where d.PATH like '${DIR_LIBRARY}/%'")
 
   (
-    IFS='	'
     # The header (centered on the output device).
     reportTitleText="RDFetch-related (not all) Rivendell Dropboxes"
     reportTitle="$(printf ' %.0s' {1..$(( (terminfo[cols] - ${#reportTitleText} ) / 2))})${BOLD}${reportTitleText}${NORM}"
@@ -1139,19 +1149,17 @@ function showRDDropboxes() {
     { printf '-%.0s' {1..$((4+13+maxPathLength+13+7+5+maxTitleLength+20))}; print; }
 
     # The data.
+    local -r oIFS="${IFS}" ; IFS='	' # Just a <Tab>
     doSQL "${query}" | while read id stationName boxpath group cart dropcuts title origin_datetime ; do
-
       if (( cart == 0 )) ; then
         title='** New cart for each episode **'
       fi
-
       printf "%3d %12s %-${maxPathLength}s %-12s %06d %3s  %-${maxTitleLength}s %-19s\\n" ${id} ${stationName} ${boxpath} ${group} ${cart} ${dropcuts} "${title}" "${origin_datetime}"
-
     done
+    IFS="${oIFS}"
 
     # The footer.
     { printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print; }
-
   ) | ${LESS} -RCiP "Viewing Rivendell Dropboxes for RDFetch?e (End of Output).\. Press <q> to quit, <PgDown> and <PgUP> to scroll, <g> to -Beginning-, <G> to -End-\."
 
   trap -
