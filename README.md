@@ -1,0 +1,81 @@
+# RDFetch - a Rivendell Podcast Fetcher
+
+RDFetch is an app that fills the RSS-feed-fetch void in Rivendell. Use
+RDFetch to configure, retrieve and import audio from arbitrary RSS
+feeds.
+
+## Installation
+
+Download the latest _rdfetch_ release from
+[github](https://opensourceradio/rdfetch/release/latest).
+
+Use the system package manager `yum`(8) to install and remove
+_rdfetch_:
+
+	sudo yum install rdfetch-<VERSION>.x86_64.rpm
+	
+where <VERSION> represents the version you have downloaded.
+
+### Requirements
+
+Installing from the RPM package will ensure all dependencies are met.
+
+* _zsh_ (`yum install zsh`)
+
+* _mysql_ client app (`yum install mysql-client`)
+
+* _podget_ not from repo, from (CentOS 7 requires a version older than 0.8.6)
+  [github source](https://github.com/podget)
+
+* _wget_ (`yum install wget`)
+
+* _/usr/bin/zsh-functions_ also in this repo
+
+* _/usr/bin/podget-wrapper_ also in this repo
+
+* all commands listed in ourCommands in _rdfetch_ and in
+  _podget-wrapper_
+
+* replace the placeholder %PODGET\_DIR\_CONFIG% with its actual value
+  in _rdfetch_ and _podget-wrapper_
+  (this is done for you when you install the RPM package)
+
+* directory structure (where *$RDFETCH* is the "_home_" directory of
+  the rdfetch app):
+
+	+ *$RDFETCH*/configuration
+	+ *$RDFETCH*/podcasts
+	+ *$RDFETCH*/log
+	  + *$RDFETCH*/log/archive
+	+ *$RDFETCH*/tmp
+
+* _$RDFETCH/configuration_:
+
+	+ _msmtp.rdfetch_ Depending on the location declared in *$MAILER_CONFIG* in _notifyrc_.
+	+ _notifyrc_ Set all variables appropriately.
+	+ _podgetrc_ Set the following variables:
+		+ DIR\_SESSION=%PODGET\_DIR\_SESSION%
+		+ DIR\_LIBRARY=%PODGET\_DIR\_LIBRARY%
+		+ DIR\_LOG=%PODGET\_DIR\_LOG%
+	+ _serverlist_ Should be empty except for the comments. This is
+      the where podget(1) gets its list of feeds to fetch
+
+### Text User Interface Configuration
+
+These tasks are performed for you when you install the package using `yum`(8) or `rpm`(1).
+
+* Place _rdfetch.svg_ in _/usr/share/icons/gnome/scalable/apps_
+	+ run `gtk-update-icon-cache /usr/share/icons/gnome` or `gtk-update-icon-cache-3.0 /usr/share/icons/gnome`
+
+* Place _rdfetch.desktop_ in _/usr/share/applications_
+
+* As the "target" user, run:
+		XDG_UTILS_DEBUG_LEVEL=999 xdg-desktop-menu install --novendor /usr/share/applications/rdfetch.desktop
+
+### Running
+
+Invoke RDFetch either from the command line in a terminal window, or
+by navigating to Applications > Rivendell > Configuration >
+RDFetch. The menu leads you through adding, deleting (or disabling),
+enabling, listing and otherwise managing the list of podcasts and
+Rivendell dropboxes.
