@@ -36,8 +36,8 @@ colors
 # This script complies with Semantic Versioning: http://semver.org/
 vMajor=0
 vMinor=4
-vPatch=10
-vHash='$Hash$'
+vPatch=11
+vHash='$Hash: 556d950$'
 
 # Get zsh functions necessary for this script.
 # SC1091: breaks before running configure.
@@ -1422,7 +1422,7 @@ EOF
 ############# BEGIN external shell commands used in this script. #############
 # This script uses these 24 external commands.
 # Look for them in their upper case, parameter expanded form.
-local -a our_commands
+typeset -a our_commands
 our_commands=( awk cat chmod column cp crontab diff find fmt getopt grep hostname less mkdir mktemp mv nl podget rm sed sort wc wget xsltproc )
 # Find the executables we need; this uses some basic shell and a ZSH trick:
 # the (U) in the eval says to evaluate the parameter as all upper case
@@ -1431,7 +1431,7 @@ our_commands=( awk cat chmod column cp crontab diff find fmt getopt grep hostnam
 # of the commands.
 # Refresh this segment in Emacs by marking the appropriate region (or the whole
 # buffer with C-xH) and replacing it with C-uM-|mk-ourCommands (shell-command-on-region).
-local C D
+typeset C D
 for C in ${our_commands[*]} ; do
   # shellcheck disable=SC2154 # ZSH: ${path} is set by the shell.
   for D in ${path} ; do
