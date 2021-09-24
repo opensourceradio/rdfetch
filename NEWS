@@ -1,5 +1,10 @@
 The NEWS file for RDFetch.
+-------------------------------------------------------------------------------
+v0.4.11 -- 27 September 2021
 
+Changes:
+   shellcheck corrections in rdfetch
+   Fix the use of ${HOSTNAME} in zsh-functions
 -------------------------------------------------------------------------------
 v0.4.3 -- 18 April 2021
 
