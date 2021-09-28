@@ -30,8 +30,8 @@ zmodload zsh/datetime
   vLibRelease=0
   vLibMajor=0
   vLibMinor=2
-  vLibPatch=16
-  vLibHash='$Hash: 556d950$'
+  vLibPatch=17
+  vLibHash='$Hash$'
 }
 function zsh_library_version() {
   printf "%d.%d.%d.%d\n" \
@@ -81,7 +81,7 @@ function sendNotification() {
   local MAILER=$(whence msmtp) ; MAILER="${MAILER:-/usr/bin/msmtp}"
   local MAILER_CONFIG="${MAILER_CONFIG:-/usr/local/etc/pmw/conf.msmtp}"
   local MAILER_ARGS="${MAILER_ARGS:-'--read-recipients --read-envelope-from  --file ${MAILER_CONFIG}'}"
-  local hostName="$(${HOSTNAME} -f})"
+  local hostName="$(${HOSTNAME} -f)"
   local PRETEND="${PRETEND}"
   local startTime="${EPOCHSECONDS}"
   local returnValue=0

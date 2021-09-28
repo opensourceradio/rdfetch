@@ -1,5 +1,10 @@
 The NEWS file for RDFetch.
 -------------------------------------------------------------------------------
+v0.4.12 -- 27 September 2021
+
+Changes:
+   Fix typo in sendNotification() in zsh-functions
+-------------------------------------------------------------------------------
 v0.4.11 -- 27 September 2021
 
 Changes:
