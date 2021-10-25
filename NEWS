@@ -1,5 +1,14 @@
 The NEWS file for RDFetch.
 -------------------------------------------------------------------------------
+v0.4.13 -- 29 October 2021
+
+Changes:
+   Refactor rdfetch to use xmlstarlet(1) instead of xsltproc(1)
+   Significant whitespace cleanup
+   Move function getYesNo() to zsh-functions
+   Other minor cleanup and clarifications
+   
+-------------------------------------------------------------------------------
 v0.4.12 -- 27 September 2021
 
 Changes:

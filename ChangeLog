@@ -23,3 +23,10 @@
 	* Fix use of $HOSTNAME in zsh-functions.in
 2021-09-27 David Klann <dklann@broadcasttool.com>
 	* Fix typo in zsh-functions:sendNotification()
+2021-10-25 David Klann <dklann@broadcasttool.com>
+	* Refactor to use xmlstarlet(1) instead of xsltproc(1)
+	* Move function getYesNo to zsh-functions
+	* Use the feed file extension instead of assuming .mp3
+	* Whitespace cleanup
+	* Clearer prompts and comments
+
