@@ -87,5 +87,5 @@ fi
 %changelog
 * Mon Aug 24 2020 David Klann <dklann@broadcasttool.com>
 - Created.
-* Mon Oct 25 10:50:46 CDT 2021 David Klann <dklann@broadcasttool.com>
+* Mon Oct 25 2021 David Klann <dklann@broadcasttool.com>
 - Updates to rdfetch and zsh-functions.
