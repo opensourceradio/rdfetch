@@ -6,7 +6,7 @@
   <refmeta>
     <refentrytitle>rdfetch</refentrytitle>
     <manvolnum>1</manvolnum>
-    <refmiscinfo class='source'>August 2020</refmiscinfo>
+    <refmiscinfo class='source'>October 2021</refmiscinfo>
     <refmiscinfo class='manual'>Linux Audio Manual</refmiscinfo>
   </refmeta>
   <refnamediv>
@@ -38,17 +38,20 @@
   </refsynopsisdiv>
   <refsect1 id='description'><title>Description</title>
   <para>
-    <command>rdfetch</command><manvolnum>1</manvolnum> is a text-menu driven
-    command-line tool for fetching and importing audio files from podcasts
-    (also known as RSS feeds) into the Rivendell Radio Automation System.
-    By default, a new cart will be created for each podcast, although this
-    behavior can be modified by choosing the appropriate option when adding
-    a podcast.
+    <command>rdfetch</command><manvolnum>1</manvolnum> is a text-menu
+    command-line tool for fetching and importing audio files from
+    podcasts (also known as RSS feeds) into the Rivendell Radio
+    Automation System. By default, a new cart is created for each
+    podcast, although this behavior can be modified by choosing the
+    appropriate option when adding a podcast.
   </para>
   <para>
-    <command>rdfetch</command> leads you through the process of setting up a download
-    using a text-based wizard. The wizard asks questions about the podcast you want to
-    retrieve and where to store the audio in Rivendell.
+    <command>rdfetch</command> leads you through the process of
+    setting up a download using a text-based wizard. The wizard asks
+    questions about the podcast you want to retrieve and where to
+    store the audio in Rivendell. Simply answer
+    <replaceable>yes</replaceable> or <replaceable>no</replaceable>,
+    and type other responses as appropriate when prompted.
   </para>
   </refsect1>
 
