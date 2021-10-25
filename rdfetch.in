@@ -1,18 +1,17 @@
 #!/bin/zsh
 # shellcheck shell=bash disable=SC2016,SC2028,SC2051,SC2064,SC2086,SC2154,SC2162
 # Globally ignore shellcheck directives:
-# SC2016 because our menu entries do not want the variables expanded until used.
-# SC2028 because escape sequences in ZSH actually work with echo.
-# SC2034 because those 'apparently unused' variable are actually used.
-# SC2051 because unlike BASH, ZSH supports variables in brace range expansions.
-# SC2064 because I want the trap expressions to be evaluated when the traps are set.
-# SC2086 because sometimes things are alreaedy double-quoted.
-# SC2154 because those variables that are 'referenced but not assigned' actually are assigned.
-# SC2162 because we do not care about backslashes in values read from STDIN.
+# SC2016: our menu entries do not want the variables expanded until used.
+# SC2028: escape sequences in ZSH actually work with echo.
+# SC2034: those 'apparently unused' variable are actually used.
+# SC2051: unlike BASH, ZSH supports variables in brace range expansions.
+# SC2064: I want the trap expressions to be evaluated when the traps are set.
+# SC2086: sometimes things are already double-quoted.
+# SC2154: those variables that are 'referenced but not assigned' actually are assigned.
+# SC2162: we do not care about backslashes in values read from STDIN.
 
 ##########################################################################################
 ##########################################################################################
-##
 ##
 ## rdfetch
 ##
@@ -25,6 +24,8 @@
 ##########################################################################################
 ##########################################################################################
 
+# FUNCTION_ARGZERO to make error messages and troubleshooting
+# functions and externally-sourced scripts make more sense.
 setopt NO_CASE_MATCH FUNCTION_ARGZERO
 zmodload zsh/regex
 zmodload zsh/datetime
@@ -36,7 +37,7 @@ colors
 # This script complies with Semantic Versioning: http://semver.org/
 vMajor=0
 vMinor=4
-vPatch=11
+vPatch=13
 vHash='$Hash: 556d950$'
 
 # Get zsh functions necessary for this script.
@@ -85,8 +86,8 @@ function addOrReplaceFeed() {
   local -r myName=${1} ; shift
   local -r verbose=${1}
 
-  local feedURL feedUser feedPassword protocol hostANDport route urlWithCredentials titleParserXSL
-  local feedTitle name group rivendellGroupList
+  local feedURL feedUser feedPassword protocol hostANDport route urlWithCredentials
+  local feedTitle name group
   local backupServerlist=/var/tmp/${CONFIG_SERVERLIST:t}
   local replaceFeed=0 addNewFeed=1
   local ok returnValue=0
@@ -123,41 +124,25 @@ function addOrReplaceFeed() {
   fi
   echo
 
-  titleParserXSL=$(makeParser /rss/channel/title)
-  trap "${RM} -f ${titleParserXSL} ; trap - ; return ;" 0 2 3
-
-  ##########################################################################################
-  ## Get the feed title, either by its own XML (with xsltproc), or by
-  ## brute force with (wget). This code snippet and the XSL parser
-  ## snippet lifted from bashpodder, http://www.lincgeek.org/bashpodder/
-  ## (link retrieved Tue Aug 9 11:27:36 CDT 2016)
-  ##########################################################################################
-  feedTitle=$(${XSLTPROC} ${titleParserXSL} "${urlWithCredentials:-${feedURL}}" 2>/dev/null ||
-                 ${WGET} -q "${urlWithCredentials:-${feedURL}}" -O - | ${GREP} -m 1 '<title>' | ${SED} -e 's,^ *<title>\(.*\)</title>.*$,\1,')
-  if [[ -z "${feedTitle}" ]] ; then
-
-    # Try it without the username and password.
-    if [[ -n "${urlWithCredentials}" ]] ; then
-
-      feedTitle=$(${XSLTPROC} ${titleParserXSL} "${feedURL}" 2>/dev/null ||
-                     ${WGET} -q "${feedURL}" -O - | ${GREP} -m 1 '<title>' | ${SED} -e 's,^ *<title>\(.*\)</title>.*$,\1,')
-
-    else
-
-      warning "I could not discern the title for this feed. Please make sure the URL, username (if needed) and password (if needed) are correct and if necessary, re-run ${myName}."
-
-    fi
+  # Get the RSS feed XML; first with credentials (if supplied).
+  typeset rssXML="$(${WGET} -q -O - ${urlWithCredentials:-${feedURL}})"
+  if [[ -z "${rssXML}" ]] ; then
+    # Try it without credentials.
+    rssXML=$(${WGET} -q -O - "${feedURL}")
   fi
-
-  ${RM} -f ${titleParserXSL}
-  trap 'trap - ; return ;' 0 2 3
+  if [[ -z "${rssXML}" ]] ; then
+    warning "I could not retrieve this feed. Please make sure the URL, username (if needed) and password (if needed) are correct and if necessary, re-run ${myName}."
+    trap -
+    return 1
+  fi
+  typeset feedTitle="$(print ${rssXML} | ${XMLSTARLET} sel -t -m /rss/channel -v title)"
+  typeset -r feedEnclosureFileExt=${$(print "${rssXML}" | ${XMLSTARLET} sel -t -m /rss/channel -v item/enclosure/@url)##*.}
 
   ##########################################################################################
-  ## Prompt for a name, use the feed title previously obtained if the
-  ## user does not enter anything.
+  ## Prompt for a name using ${feedTitle} as the default.
   ##########################################################################################
-  read name\?"Enter a name for this podcast (${BOLD}Note: I may do some manipulation of the name${NORM}): ${feedTitle:+[${feedTitle}]} "
-  [[ -z "${name}" ]] && name=${feedTitle}
+  read name\?"Enter a name for this podcast (${BOLD}Note: I may slightly modify the name${NORM}): ${feedTitle:+[${feedTitle}]} "
+  [[ -z "${name}" ]] && name="${feedTitle}"
   # From the inside out, this parameter substitution does the following:
   #    converts the characters <Space> <Comma> : ! # * ? < > & $ / ( ) + to a dash ("-")
   #    deletes single (') and double (") quotes
@@ -165,29 +150,25 @@ function addOrReplaceFeed() {
   # The sed(1) expression replaces two or more dashes ("-") with a single dash.
   cleanName=$(echo ${${${name//[: ,\!\?\&\$\/\)\(\#\*\\\>\<\+]/-}//[\"\']/}/%-/} | ${SED} -e 's/--*/-/g')
   read ok\?"Using ${cleanName} for the podcast name. Is this OK? [y or n]: "
-  until [[ ${ok} =~ [Yy] ]] ; do
-
-    echo
-    read name\?"OK, try again. Enter a name for this podcast: "
+  until [[ "${(L)ok}" =~ ^y(es)*$ ]] ; do
+    print
+    read name\?"OK, let's try again. Enter a name for this podcast: "
     cleanName=$(echo ${${${name//[: ,\!\?\&\$\/\)\(\#\*\\\>\<\+]/-}//[\"\']/}/%-/} | ${SED} -e 's/--*/-/g')
     read ok\?"Using '${cleanName}' for the podcast name. Is this OK? [y or n]: "
-
   done
-  feedName="${cleanName}"
+  local -r feedName="${cleanName}"
 
   ##########################################################################################
   ## Get the "category" for this podcast. Use a Rivendell GROUP for the category name.
   ##########################################################################################
-  rivendellGroupList=$(doSQL "select NAME from GROUPS where DEFAULT_CART_TYPE=1 order by NAME")
+  local -r rivendellGroupList="$(doSQL "select NAME from GROUPS where DEFAULT_CART_TYPE=1 order by NAME")"
 
-  # List the groups and prompt them for a group to use if they asked for
-  # a list or if they did not name a group.
+  # List the Groups and prompt them for a Group to use if they asked
+  # for a list or if they did not name a Group.
   if [[ -z "${group}" ]] || [[ "${group}" =~ list ]] ; then
-
     echo "\nCurrent list of GROUPs:"
-    ${COLUMN} -x -c $(( COLUMNS > 80 ? 78 : COLUMNS )) <<< ${rivendellGroupList}
+    ${COLUMN} -x -c $((COLUMNS > 80 ? 78 : COLUMNS)) <<< ${rivendellGroupList}
     read group\?"Type the name of the Rivendell GROUP into which this podcast will be imported: "
-
   fi
 
   ##########################################################################################
@@ -195,16 +176,14 @@ function addOrReplaceFeed() {
   ## Rivendell database.
   ##########################################################################################
   until ${GREP} -q "^${group}$" <<< ${rivendellGroupList} ; do
-
     warning "'${group}' is not in the list. Please use a valid GROUP name."
 
     echo "Current list of GROUPs:"
-    ${COLUMN} -x -c $(( COLUMNS > 80 ? 78 : COLUMNS )) <<< ${rivendellGroupList}
+    ${COLUMN} -x -c $((COLUMNS > 80 ? 78 : COLUMNS)) <<< ${rivendellGroupList}
     read group\?"Enter the Rivendell GROUP into which this podcast will be imported: "
-
   done
 
-  (( verbose )) && warning "${myName} (verbose): ${feedURL} ${group} ${feedName}${feedUser:+' USER:${feedUser}'}${feedPassword:+' PASS:${feedPassword}'}"
+  ((verbose)) && warning "${myName} (verbose): ${feedURL} ${group} ${feedName}${feedUser:+' USER:${feedUser}'}${feedPassword:+' PASS:${feedPassword}'}"
   echo
 
   ##########################################################################################
@@ -220,48 +199,35 @@ function addOrReplaceFeed() {
 
   # Same group and name (possibly different URL?).
   if ${GREP} -P -q "^[^#].*\s+${group}\s+${feedName}\s*" ${DIR_CONFIG}/${CONFIG_SERVERLIST} ; then
-
     addNewFeed=0
     if getYesNo "${feedName} already exists in group ${group}. Replace?" ; then
-
       ${GREP} -P -v "^[^#].*\s+${group}\s+${feedName}\s*" ${DIR_CONFIG}/${CONFIG_SERVERLIST} > ${tmpfile}
       replaceFeed=1
-
     fi
-
   # Same name, different group.
   elif ${GREP} -P -q "^[^#].*\s+${feedName}\s*" ${DIR_CONFIG}/${CONFIG_SERVERLIST} ; then
-
     addNewFeed=0
     if getYesNo "${feedName} already exists in a different group. Change to group '${group}'?" ; then
-
       ${GREP} -P -v "^[^#].*\s+${feedName}\s*" ${DIR_CONFIG}/${CONFIG_SERVERLIST} > ${tmpfile}
       replaceFeed=1
-
     fi
   fi
 
-  if (( addNewFeed || ! replaceFeed )) ; then
-
+  if ((addNewFeed || ! replaceFeed)) ; then
     # A new feed.
     ${CP} ${DIR_CONFIG}/${CONFIG_SERVERLIST} ${tmpfile}
-
   fi
 
-  if (( addNewFeed || replaceFeed )) ; then
-
+  if ((addNewFeed || replaceFeed)) ; then
       ${CAT} <<EOF >> ${tmpfile}
 ${feedURL} ${group} ${feedName}${feedUser:+" USER:${feedUser}"}${feedPassword:+" PASS:${feedPassword}"}
 EOF
-
   fi
 
   if [[ -s ${tmpfile} ]] ; then
-
     # There should be no more than two lines of difference between the
     # original and the edited file.
-    if (( $(${DIFF} --side-by-side --suppress-common-lines ${DIR_CONFIG}/${CONFIG_SERVERLIST} ${tmpfile} | ${WC} -l) <= 2 )) ; then
-
+    if (($(${DIFF} --side-by-side --suppress-common-lines ${DIR_CONFIG}/${CONFIG_SERVERLIST} ${tmpfile} | ${WC} -l) <= 2)) ; then
       # We made a tmpfile, so replace serverlist with its contents.
       ${MV} ${tmpfile} ${DIR_CONFIG}/${CONFIG_SERVERLIST} ||
         return "$(error 'Could not replace ${DIR_CONFIG}/${CONFIG_SERVERLIST}.')"
@@ -277,7 +243,7 @@ EOF
       ## Offer to create a Rivendell dropbox if we are making changes
       ## to this podcast (new or replace).
       ##########################################################################################
-      if addRDDropbox ${myName} ${DIR_LIBRARY} ${feedName} ${group} ${verbose} ; then
+      if addRDDropbox ${myName} ${DIR_LIBRARY} ${feedName} "${feedEnclosureFileExt}" ${group} ${verbose} ; then
 
         # Second arg indicates we are calling rdDropboxStatus interactively.
         rdDropboxStatus ${myName} 1 ${verbose}
@@ -291,32 +257,24 @@ EOF
             printf "Sorry. I could not create a new event for %s\n" "${feedName}"
           fi
         fi
-
       fi
-
-      read ok\?"Podcast $( (( replaceFeed )) && echo replaced || echo added). Press <Enter> to continue. "
-
+      read ok\?"Podcast $( ((replaceFeed)) && echo replaced || echo added). Press <Enter> to continue. "
     else
-
       returnValue=$(error "Found an unexpected error in the new podcast feed file while attempting to add '${feedName}'")
       echo "Restoring backup. Please notify the authorities!"
 
-      (( verbose )) && { echo "${myName} (verbose):" ; ${DIFF} --side-by-side --suppress-common-lines ${DIR_CONFIG}/${CONFIG_SERVERLIST} ${tmpfile} ; }
+      ((verbose)) && { echo "${myName} (verbose):" ; ${DIFF} --side-by-side --suppress-common-lines ${DIR_CONFIG}/${CONFIG_SERVERLIST} ${tmpfile} ; }
       ${MV} ${backupServerlist} ${DIR_CONFIG}/${CONFIG_SERVERLIST}
 
       read ok\?"Press <Enter> to continue. "
-
     fi
-
   else
-
     returnValue=$(error "Found an empty podcast feed file while attempting to add feed '${feedName}'")
     echo "Restoring backup. Please notify the authorities!"
 
     ${MV} ${backupServerlist} ${DIR_CONFIG}/${CONFIG_SERVERLIST}
 
     read ok\?"Press <Enter> to continue. "
-
   fi
 
   trap -
@@ -326,7 +284,8 @@ function enableFeed() {
   local -r myName=${1} ; shift
   local -r verbose=${1}
 
-  local feedList feedNameEntered feedName group tmpfile
+  local feedList feedNameEntered feedName group feedURL tmpfile
+  local urlWithCredentials rssXML configLine feedUser feedPass
 
   trap 'trap - 0 2 3 ; return ;' 0 2 3
 
@@ -334,26 +293,20 @@ function enableFeed() {
 
   # Try to enable feeds only if there actually are any disabled ones.
   if [[ -n "${feedList}" ]] ; then
-
-    if (( $(${WC} -l <<<${feedList}) > 1 )) ; then
-
+    if (($(${WC} -l <<<${feedList}) > 1)) ; then
       echo "Current list of disabled podcast feeds:"
-      ${COLUMN} -x -c $(( COLUMNS > 80 ? 78 : COLUMNS )) <<< ${feedList}
+      ${COLUMN} -x -c $((COLUMNS > 80 ? 78 : COLUMNS)) <<< ${feedList}
       read feedNameEntered\?"Type or paste the name of the podcast you want to enable and press <Enter>: "
 
       # Allow '*'-style wildcards in the feedName, will expand it below.
       until feedName=$(${GREP} -i "^${feedNameEntered//\*/.*}$" <<< ${feedList}) ; do
-
         warning "'${feedNameEntered}' is not in the list. Please use a valid feed name."
 
         echo "Current list of disabled podcast feeds:"
-        ${COLUMN} -x -c $(( COLUMNS > 80 ? 78 : COLUMNS )) <<< ${feedList}
-        read feedNameEntered\?"Type or paste the name of the podcast ('*' wildcard OK) you want to enable: "
-
+        ${COLUMN} -x -c $((COLUMNS > 80 ? 78 : COLUMNS)) <<< ${feedList}
+        read feedNameEntered\?"Type or paste the name of the podcast you want to enable: "
       done
-
     else
-
       # There is only one feed to enable, so prompt to enable it.
       feedName=${feedList}
       read ok\?"Press 'y' to enable the feed '${feedName}', or any other key to cancel: "
@@ -362,7 +315,6 @@ function enableFeed() {
         return
       fi
       echo
-
     fi
 
     echo "Enabling '${feedName}' in the feed list... \c"
@@ -372,42 +324,65 @@ function enableFeed() {
     ${SED} -i.bak -e "/^#DISABLED#.*[[:space:]]${feedName}[[:space:]]*/s/^#DISABLED#//" ${DIR_CONFIG}/${CONFIG_SERVERLIST}
     # The sed command *should* result in exactly one line of
     # difference between the original and the edited file.
-    if (( $(${DIFF} --side-by-side --suppress-common-lines ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak ${DIR_CONFIG}/${CONFIG_SERVERLIST} | ${WC} -l) == 1 )) ; then
-
+    if (($(${DIFF} --side-by-side --suppress-common-lines ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak ${DIR_CONFIG}/${CONFIG_SERVERLIST} | ${WC} -l) == 1)) ; then
       ${RM} -f ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak
 
-      group=$(${AWK} "/[[:space:]]${feedName}[[:space:]]*/{print \$2}" ${DIR_CONFIG}/${CONFIG_SERVERLIST})
+      configLine=$(${GREP} "[[:space:]]${feedName}[[:space:]]*" ${DIR_CONFIG}/${CONFIG_SERVERLIST})
+      group=$(print "${configLine}" | ${AWK} '{print $2}')
 
-      if [[ ! -d ${DIR_LIBRARY}/${group}/${feedName} ]] ; then
+      if ! [[ -d ${DIR_LIBRARY}/${group}/${feedName} ]] ; then
         ${MKDIR} -p ${DIR_LIBRARY}/${group}/${feedName} ||
           warning "Failed to create new podcast directory ${DIR_LIBRARY}/${group}/${feedName} (${?}). You may have to create this yourself."
       fi
 
+      feedURL="${configLine%% *}"
+      if [[ "${configLine}" =~ .*USER:.* ]] ; then
+        feedUser=$(print "${configLine}" | ${AWK} '{print $4}')
+      fi
+      if [[ "${configLine}" =~ .*PASS:.* ]] ; then
+        feedPass=$(print "${configLine}" | ${AWK} '{print $5}')
+      fi
+      # Splice the credentials into the feed URL.
+      if [[ -n "${feedUser}" ]] && [[ -n "${feedPass}" ]] ; then
+        urlWithCredentials="${feedURL%%:*}://${feedUser}:${feedPass}@${feedURL#*://}"
+      fi
+
+      # Get the RSS feed XML; first with credentials (if supplied).
+      if ! rssXML=$(${WGET} -q -O - "${urlWithCredentials:-${feedURL}}") ; then
+        warning "wget(1) returned with exit status '${?}'."
+        if [[ -n "${feedUser}" ]] ; then
+          warning "Will attempt without credentials."
+        fi
+      fi
+      if [[ -z "${rssXML}" ]] ; then
+        # Try it without credentials.
+        if ! rssXML=$(${WGET} -q -O - "${feedURL}") ; then
+          warning "wget(1) returned with exit status '${?}'. I will be unable to discern the download file type."
+        fi
+      fi
+      if [[ -z "${rssXML}" ]] ; then
+        warning "I could not retrieve this feed. Please make sure the URL, username (if needed) and password (if needed) are correct and try again."
+      else
+        typeset feedTitle=$(echo "${rssXML}" | ${XMLSTARLET} sel -t -m /rss/channel -v title --nl)
+        typeset -r feedEnclosureFileExt=${$(echo "${rssXML}" | ${XMLSTARLET} sel -t -m /rss/channel -v item/enclosure/@url --nl)##*.}
+      fi
+
       # Offer to create a Rivendell dropbox if we are making changes
       # to this podcast (new or replace).
-      if addRDDropbox ${myName} ${DIR_LIBRARY} ${feedName} ${group} ${verbose} ; then
-
+      if addRDDropbox ${myName} ${DIR_LIBRARY} ${feedName} "${feedEnclosureFileExt}" ${group} ${verbose} ; then
         # Second arg indicates we are calling rdDropboxStatus interactively.
         rdDropboxStatus ${myName} 1 ${verbose}
-
       fi
       echo "Done."
-
     else
-
       warning "Could not properly enable the disabled podcast feed '${feedName}'.
 Please fix the file '${DIR_CONFIG}/${CONFIG_SERVERLIST}' manually."
 
       ${RM} -f ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak
-
     fi
-
     read ok\?"Press <Enter> to continue. "
-
   else
-
     read ok\?"There are no disabled feeds available. Press <Enter> to continue. "
-
   fi
 
   trap -
@@ -432,31 +407,24 @@ function deleteFeed() {
 
   # Prompt for a feed to delete only if there is more than one in
   # the list.
-  if (( $(${WC} -l <<<${feedList}) > 1 )) ; then
-
+  if (($(${WC} -l <<<${feedList}) > 1)) ; then
     echo "Current list of podcast feeds:"
-    ${COLUMN} -x -c $(( COLUMNS > 80 ? 78 : COLUMNS )) <<< ${feedList}
+    ${COLUMN} -x -c $((COLUMNS > 80 ? 78 : COLUMNS)) <<< ${feedList}
     read feedNameEntered\?"Enter the name of the podcast ('*' wildcard OK) you want to delete or disable (and press <Enter>): "
-
     until feedName=$(${GREP} "^${feedNameEntered//\*/.*}$" <<< ${feedList}) ; do
-
       warning "'${feedNameEntered}' is not in the list. Please use a valid feed name."
 
       echo "Current list of podcast feeds:"
-      ${COLUMN} -x -c $(( COLUMNS > 80 ? 78 : COLUMNS )) <<< ${feedList}
+      ${COLUMN} -x -c $((COLUMNS > 80 ? 78 : COLUMNS)) <<< ${feedList}
       read feedNameEntered\?"Enter the name of the podcast ('*' wildcard OK) you want to delete or disable: "
-
     done
-
   else
-
     # Only one feed, so offer it for deletion.
     feedName=${feedList}
-
   fi
 
   group=$(${AWK} "/[[:space:]]${feedName}[[:space:]]*/{print \$2}" ${DIR_CONFIG}/${CONFIG_SERVERLIST})
-  (( verbose )) && warning "${myName} (verbose): deleting '${feedName}' from '${group}'."
+  ((verbose)) && warning "${myName} (verbose): deleting '${feedName}' from '${group}'."
 
   read deleteOrDisable\?"Do you want to disable (d) or delete (D) '${feedName}'? "
   until [[ "${deleteOrDisable}" =~ [Dd] ]] ; do
@@ -473,7 +441,7 @@ function deleteFeed() {
     ${SED} -i.bak -e "/[[:space:]]${feedName}[[:space:]]*/s/^/#DISABLED#/" "${DIR_CONFIG}/${CONFIG_SERVERLIST}"
     # The sed command *should* result in exactly one line of
     # difference between the original and the edited file.
-    if (( $(${DIFF} --side-by-side --suppress-common-lines ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak ${DIR_CONFIG}/${CONFIG_SERVERLIST} | ${WC} -l) != 1 )) ; then
+    if (($(${DIFF} --side-by-side --suppress-common-lines ${DIR_CONFIG}/${CONFIG_SERVERLIST}.bak ${DIR_CONFIG}/${CONFIG_SERVERLIST} | ${WC} -l) != 1)) ; then
       warning "Could not properly disable the podcast feed '${feedName}'. Please fix the file '${DIR_CONFIG}/${CONFIG_SERVERLIST}' manually."
     fi
 
@@ -534,8 +502,8 @@ function showFeeds() {
 
   (
     # The header.
-    reportTitleText="${activeCount} RDFetch Podcasts ($( ((disabledCount > 0 )) && echo ${RED})${disabledCount} Disabled${NORM})"
-    reportTitle="$(printf ' %.0s' {1..$(( (terminfo[cols] - ${#reportTitleText}) / 2))})${BOLD}${reportTitleText}${NORM}"
+    reportTitleText="${activeCount} RDFetch Podcasts ($( ((disabledCount > 0)) && echo ${RED})${disabledCount} Disabled${NORM})"
+    reportTitle="$(printf ' %.0s' {1..$(((terminfo[cols] - ${#reportTitleText}) / 2))})${BOLD}${reportTitleText}${NORM}"
     printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
     print "${reportTitle}"
     printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
@@ -595,7 +563,7 @@ function showLastStatus() {
             reportTitleText="${reportTitleText} as of ${fileTime}"
           fi
           # Center the title on the display.
-          reportTitle="$(printf ' %.0s' {1..$(( (terminfo[cols] - ${#reportTitleText} ) / 2))})${BOLD}${reportTitleText}${NORM}"
+          reportTitle="$(printf ' %.0s' {1..$(((terminfo[cols] - ${#reportTitleText} ) / 2))})${BOLD}${reportTitleText}${NORM}"
           printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
           print "${reportTitle}"
           printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
@@ -606,12 +574,10 @@ function showLastStatus() {
           # The footer.
           printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print
         ) | ${LESS} -RCiP "Viewing the latest podget ${OUTPUT}?e (End of Output).\. Press <q> to quit, <PgDown> and <PgUP> to scroll, <g> to -Beginning-, <G> to -End-\."
-
       else
         warning "Could not determine the time of last access of '${statusFile}' (${?}). Please seek professional help."
         read ok\?"Press <Enter> to continue. "
       fi
-
     else
       warning "RDFetch status file '${statusFile}' exists, but is not readable. Please seek professional help."
       read ok\?"Press <Enter> to continue. "
@@ -647,13 +613,13 @@ function showRDimportLogs() {
       fi
       titleText="${logfile} as of ${fileTime}"
       # Center the title on the display.
-      reportTitle="$(printf ' %.0s' {1..$(( (terminfo[cols] - ${#titleText} ) / 2))})${BOLD}${titleText}${NORM}"
+      reportTitle="$(printf ' %.0s' {1..$(((terminfo[cols] - ${#titleText} ) / 2))})${BOLD}${titleText}${NORM}"
       { printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print; }
       print "${reportTitle}"
       { printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print; }
 
       # The data (and make it pretty, please).
-      if (( logfileStat[size] )) ; then
+      if ((logfileStat[size])) ; then
         ${SED} -r \
                -e "s/^(..-..-.... - ..:..:..)/${BOLD}\1${NORM}/" \
                -e "s/(error|skipping)/${BOLD}${RED}\1${NORM}/gi" \
@@ -705,16 +671,15 @@ function clearRDimportLog() {
     echo "\nDone. \c"
     read -q foo\?"Press <Enter> to return to the menu. "
     trap -
-    return ${returnValue}
+    return "${returnValue}"
   fi
-
 
   if [[ -n "${logFiles[*]}" ]] ; then
     echo "\nHere are all the rdimport log files I could find in '${DIR_LIBRARY}':"
     ${FMT} <<<${logFiles[*]} | ${SED} -r -e 's,^(.*/rdimport.log):([[:digit:]]+)$,(\2 bytes)  \1,' | ${NL}
 
     read logfileIndex\?"Type the number of the log file you want to clear and press <Enter>: "
-    until (( logfileIndex )) ; do
+    until ((logfileIndex)) ; do
       warning "You need to type a number between 1 and ${#logFiles}."
       read logfileIndex\?"Please type the number of the log file you want to clear and press <Enter>: "
     done
@@ -760,7 +725,7 @@ function addSimpleEvent() {
     returnValue=${?}
     error "${0}() (${zsh_eval_context}): This version of ${my_name} is not compatible with Rivendell database version $(rdDatabaseVersion). You need to manually add an Event."
     read ok\?"Press <Enter> to continue. "
-    return ${returnValue}
+    return "${returnValue}"
   fi
 
   # The Cart title will be the same as feed_name if they added a
@@ -805,7 +770,7 @@ function addSimpleEvent() {
     return 7
   fi
   trap -
-  IFS='	' # Just a <Tab>.
+  IFS=$'\t' # Just a <Tab>.
   # SC2046: This read is going to be word-split, but I am dealing with it.
   # shellcheck disable=SC2046
   if ! read -r cart_number event_name <<<$(doSQL "select CART_NUMBER, NAME from EVENTS join EVENT_LINES on NAME = EVENT_NAME where NAME = '${event_name}'") ; then
@@ -872,18 +837,14 @@ ${BOLD}$(${GREP} 'podget-wrapper' <<<${crontab})${NORM}
 EOF
 
     if ! getYesNo "Do you want to change the schedule?" ; then
-
       echo "\nLeaving the download schedule as it is."
       read ok\?"Press <Enter> to continue. "
       trap -
       return
-
     fi
-
     # Pre-fill the vailues we will later prompt for.
     minute=$(${AWK} '/^[^#].*podget-wrapper/{print $1}' <<<${crontab})
     hour=$(${AWK} '/^[^#].*podget-wrapper/{print $2}' <<<${crontab})
-
   fi
 
   ${FMT} <<EOF
@@ -899,15 +860,12 @@ EOF
 
   unset ok
   until [[ "${ok}" =~ y ]] ; do
-
     oHour=${hour}
     read hour\?"Type the hour(s) you want ${myName} to check for new podcasts (enter '*' for every hour): ${hour:+[${hour}] }"
     [[ -z "${hour}" ]] && hour=${oHour}
     until [[ "${hour}" = '*' ]] || [[ "${hour}" =~ [[:digit:],]+ ]] ; do
-
       echo "You need to enter either an asterisk ('*'), or some combination of hour numbers and commas."
       read hour\?"Type the hour(s) you want ${myName} to check for new podcasts (enter '*' for every hour): "
-
     done
 
     ${FMT} <<EOF
@@ -921,10 +879,8 @@ EOF
     [[ -z "${minute}" ]] && minute=${oMinute}
     # Note: we explicitely DO NOT permit 'every minute' here.
     until [[ "${minute}" =~ ^[[:digit:],]+$ ]] ; do
-
       echo "You need to enter combination of minute numbers and commas."
       read minute\?"Type the minute(s) of the hour(s) ('${hour}') you want to check for podcasts: "
-
     done
 
     echo "Using 'hour: ${hour}' and 'minute: ${minute}' for the podcast download schedule."
@@ -937,7 +893,6 @@ EOF
     fi
 
     ok=y
-
   done
 
   (
@@ -989,6 +944,7 @@ function addRDDropbox() {
   local -r myName=${1} ; shift
   local -r dirLibrary=${1} ; shift
   local -r feedName=${1} ; shift
+  local -r feedEnclosureFileExt=${1} ; shift
   local -r feedGroup=${1} ; shift
   local -r verbose=${1}
 
@@ -1008,17 +964,17 @@ function addRDDropbox() {
   ## See whether there is a dropbox with a matching pathname.
   ##########################################################################################
   query="select d.ID,d.PATH,d.TO_CART,d.GROUP_NAME from DROPBOXES d where d.PATH like '${DIR_LIBRARY}/${feedGroup}/${feedName}/%'"
-  IFS='	' # Just <Tab>
+  IFS=$'\t' # Just a <Tab>
   # ShellCheck is a bit too aggressive in its quoting suggestions.
   # shellcheck disable=SC2046
   read dropboxID dropboxPATH dropboxCARTNUM dropboxGROUP <<<$(doSQL "${query}")
   IFS="${oIFS}"
-  if (( dropboxID )) ; then
+  if ((dropboxID)) ; then
     # We *want* the quotes to be treated literally.
     # shellcheck disable=SC2089
     info="It appears as if Rivendell dropbox '${dropboxID}' watches for files at '${dropboxPATH}'."
 
-    if (( dropboxCARTNUM )) ; then
+    if ((dropboxCARTNUM)) ; then
       cartTITLE="$(rdCartTitleFromNumber ${dropboxCARTNUM} ${verbose})"
       info="${info} The dropbox uses the CART '${cartTITLE}' (number ${dropboxCARTNUM})."
       ${FMT} <<<"${info}"
@@ -1041,7 +997,7 @@ function addRDDropbox() {
   ##########################################################################################
   ## Create a new Rivendell dropbox
   ##########################################################################################
-  if (( createANewDropbox )) ; then
+  if ((createANewDropbox)) ; then
     echo
     if getYesNo "Would you like to set up a Rivendell dropbox for '${feedName}'?" ; then
       # Offer to use an existing cart if it exists and has the same
@@ -1051,7 +1007,7 @@ function addRDDropbox() {
         if getYesNo "CART number '${existingCartNumber}' has the title '${feedName}'. Do you want to use this CART?" ; then
           dropboxCartNumber=${existingCartNumber}
         fi
-      elif getYesNo "Create a new CART and assign each '${feedName}' episode to it (one CART for all episodes)?" ; then
+      elif getYesNo "Create a new CART and import every '${feedName}' episode to it (one CART for all episodes)?" ; then
         dropboxCartNumber=$(rdCreateEmptyCart ${feedGroup} ${feedName})
       else
         if getYesNo "OK, do you want each '${feedName}' episode to be placed into its own (new) CART?" ; then
@@ -1093,7 +1049,7 @@ Enter an existing CART number to assign to this podcast feed: "
       ## Actually create the new dropbox.
       ##########################################################################################
       if [[ -n "${dropboxCartNumber}" ]] ; then
-        if dropboxID=$(createDropbox ${feedGroup} ${feedName} ${DIR_LIBRARY} ${fileExt} ${dropboxCartNumber} ${verbose}) ; then
+        if dropboxID=$(createDropbox ${feedGroup} ${feedName} ${DIR_LIBRARY} ${feedEnclosureFileExt:-${defaultFileExt}} ${dropboxCartNumber} ${verbose}) ; then
           echo "Dropbox number ${dropboxID} created."
           returnValue=0
         else
@@ -1142,10 +1098,10 @@ function showRDDropboxes() {
   maxTitleLength=$(doSQL "select max(length(c.TITLE)) from DROPBOXES d join CART c on d.TO_CART = c.NUMBER where d.PATH like '${DIR_LIBRARY}/%'")
 
   (
-    local -r oIFS="${IFS}" ; IFS='	' # Just a <Tab>
+    local -r oIFS="${IFS}" ; IFS=$'\t' # Just a <Tab>
     # The header (centered on the output device).
     reportTitleText="RDFetch-related (not all) Rivendell Dropboxes"
-    reportTitle="$(printf ' %.0s' {1..$(( (terminfo[cols] - ${#reportTitleText} ) / 2))})${BOLD}${reportTitleText}${NORM}"
+    reportTitle="$(printf ' %.0s' {1..$(((terminfo[cols] - ${#reportTitleText} ) / 2))})${BOLD}${reportTitleText}${NORM}"
     { printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print; }
     print "${reportTitle}"
     { printf ' '; printf '=%.0s' {1..$((terminfo[cols] - 2))} ; print; }
@@ -1154,7 +1110,7 @@ function showRDDropboxes() {
 
     # The data.
     doSQL "${query}" | while read id stationName boxpath group cart dropcuts title origin_datetime ; do
-      if (( cart == 0 )) ; then
+      if ((cart == 0)) ; then
         title='** New cart for each episode **'
       fi
       printf "%3d %12s %-${maxPathLength}s %-12s %06d %3s  %-${maxTitleLength}s %-19s\\n" ${id} ${stationName} ${boxpath} ${group} ${cart} ${dropcuts} "${title}" "${origin_datetime}"
@@ -1214,7 +1170,6 @@ About to delete the Rivendell dropbox ID '${id}' which watches for files at '${b
 EOF
 
   if getYesNo "Press 'y' to proceed, or 'n' to cancel" ; then
-
     query="delete from DROPBOXES where ID = ${id}"
     doSQL "${query}"
 
@@ -1282,30 +1237,6 @@ function cleanupFeed() {
   fi
 }
 
-function makeParser() {
-  local -r selection=${1:?"Need an XML selection."}
-
-  local tmpfile
-
-  tmpfile=$(${MKTEMP}) || { echo '' ; return 2 ; }
-  
-  ${CAT} > ${tmpfile} <<EOF
-<?xml version="1.0"?>
-<stylesheet version="1.0"
-        xmlns="http://www.w3.org/1999/XSL/Transform">
-        <output method="text"/>
-        <template match="/">
-                <apply-templates select="${selection}"/>
-        </template>
-        <template match="enclosure">
-                <value-of select="@url"/><text>&#10;</text>
-        </template>
-</stylesheet>
-EOF
-
-  echo ${tmpfile}
-}
-
 function createDropbox() {
   local -r feedGroup=${1:?"Need a Rivendell GROUP to assign to this dropbox."} ; shift
   local -r feedName=${1:?"Need a podcast feed name for this dropbox."} ; shift
@@ -1336,7 +1267,6 @@ function createDropbox() {
   fi
 
   if stationName=$(rdGetStationName) ; then
-
     ## This shell array variable gets turned into a single string below.
     query=(
       "insert into DROPBOXES"
@@ -1346,49 +1276,24 @@ function createDropbox() {
     )
 
     if doSQL "${(j: :)query}" ; then
-
       # Make sure we created the new dropbox
       dropboxID=$(doSQL "select ID from DROPBOXES where PATH = '${dropboxPath}/*.${fileExt}'")
 
       if [[ -z "${dropboxID}" ]] ; then
-
         warning "Unable to discern the new dropbox ID. Did the dropbox get created?"
         returnValue=1
-
       else
         echo ${dropboxID}
       fi
-
     else
-
       warning "Attempt to create new dropbox failed (${?}). Please seek professional advice."
       returnValue=1
-
     fi
-
   else
-
     returnValue=2
-
   fi
 
   return "${returnValue}"
-}
-
-# Return 0 ("success") for a "yes"-like response and 1 ("non-success")
-# for a "no"-like response to the given prompt.
-function getYesNo() {
-  local -r our_prompt="${1}"
-
-  local response=''
-  until [[ "${(L)response}" =~ ^(no*|y(es)*)$ ]] ; do
-    echo "${our_prompt} [y or n] \c" > /dev/tty
-    # response is actually used, but in a non-Bash way, see below.
-    # shellcheck disable=SC2034
-    read response < /dev/tty
-  done
-  [[ "${(L)response}" =~ n ]] && return 1
-  return 0
 }
 
 function warning() {
@@ -1423,7 +1328,7 @@ EOF
 # This script uses these 24 external commands.
 # Look for them in their upper case, parameter expanded form.
 typeset -a our_commands
-our_commands=( awk cat chmod column cp crontab diff find fmt getopt grep hostname less mkdir mktemp mv nl podget rm sed sort wc wget xsltproc )
+our_commands=( awk cat chmod column cp crontab diff find fmt getopt grep hostname less mkdir mktemp mv nl podget rm sed sort wc wget xmlstarlet )
 # Find the executables we need; this uses some basic shell and a ZSH trick:
 # the (U) in the eval says to evaluate the parameter as all upper case
 # letters. This snippet generates shell parameters representing the upper case
@@ -1478,7 +1383,7 @@ typeset -r YELLOW="${fg_bold[yellow]}"
 typeset -r BOLD="${bold_color}"
 typeset -r NORM="${reset_color}"
 # Hard code this for now.
-typeset -r fileExt=mp3
+typeset -r defaultFileExt=mp3
 
 # Ensure the configuration directory exists.
 if [[ ! -d ${DIR_CONFIG} ]] ; then
@@ -1494,7 +1399,7 @@ until [[ -r ${DIR_CONFIG}/${CONFIG_CORE} ]] ; do
   warning "Unable to read configuration file ${DIR_CONFIG}/${CONFIG_CORE}. Running podget to create a new configuration..."
 
   ${PODGET} --dir_config ${DIR_CONFIG}
-  ((failCount++ > maxAttempts )) &&
+  ((failCount++ > maxAttempts)) &&
     exit "$(error 'Unable to create ${DIR_CONFIG}/${CONFIG_CORE} ${maxAttempts} times. I quit.')"
 done
 
@@ -1506,7 +1411,6 @@ done
 ##########################################################################################
 ## The guts of why we are here.
 ##########################################################################################
-
 typeset -a menu command windowTitle
 typeset -i -R 2 count
 typeset choice
@@ -1583,42 +1487,34 @@ while : ; do
 
   for menuItem in ${menu[*]} ; do
     echo "${count}) $(eval echo ${menuItem})"
-    (( count++ ))
+    ((count++))
   done
+
   echo
-
   read choice\?"Type your choice and press <Enter>: "
-
   echo
 
   if [[ -z "${choice}" ]] ; then
-    echo "Please enter a number between 0 and $(( count - 1 ))."
+    echo "Please enter a number between 0 and $((count - 1))."
     read ok\?"Press <Enter> to continue. "
-
   elif [[ ${choice} =~ ^[0Qq]$ ]] ; then
     printf '\033]0;%s\007' ''
     exit
-
   elif [[ "${choice}" =~ [[:space:]]*[[:alpha:]]+ ]] ; then
-    echo "'${choice}' is not an option. Please enter a number between 0 and $(( count - 1 ))."
+    echo "'${choice}' is not an option. Please enter a number between 0 and $((count - 1))."
     read ok\?"Press <Enter> to continue. "
-
   elif [[ "${choice}" =~ [[:space:]]*[[:alnum:]]+[[:space:]]+ ]] ; then
-    echo "'${choice}' is not an option (watch your spaces). Please enter a number between 0 and $(( count - 1 ))."
+    echo "'${choice}' is not an option (watch your spaces). Please enter a number between 0 and $((count - 1))."
     read ok\?"Press <Enter> to continue. "
-
-  elif (( choice > 0 && choice < count )) ; then
-
+  elif ((choice > 0 && choice < count)) ; then
     # Set the window title for this menu choice then run the command.
     printf '\033]0;%s\007' ${windowTitle[${choice}]}
     # eval() needs the use of echo() to work properly here
     # shellcheck disable=SC2046,SC2116
     eval $(echo ${command[${choice}]})
-
   else
-    echo "'${choice}' is not an option. Please enter a number between 0 and $(( count - 1 ))."
+    echo "'${choice}' is not an option. Please enter a number between 0 and $((count - 1))."
     read ok\?"Press <Enter> to continue. "
-
   fi
 
   # As found in ZSH module zsh/terminfo.
