@@ -33,20 +33,20 @@ Installing from the RPM package will ensure all dependencies are met.
 
 * _/usr/bin/podget-wrapper_ also in this repo
 
-* all commands listed in ourCommands in _rdfetch_ and in
-  _podget-wrapper_
+* all commands listed in the shell parameter our\_commands in
+  _rdfetch_ and in _podget-wrapper_
 
 * replace the placeholder %PODGET\_DIR\_CONFIG% with its actual value
   in _rdfetch_ and _podget-wrapper_
   (this is done for you when you install the RPM package)
 
 * directory structure (where *$RDFETCH* is the "_home_" directory of
-  the rdfetch app):
+  the rdfetch app, _/home/rd_ by default):
 
 	+ *$RDFETCH*/configuration
 	+ *$RDFETCH*/podcasts
 	+ *$RDFETCH*/log
-	  + *$RDFETCH*/log/archive
+	+ *$RDFETCH*/log/archive
 	+ *$RDFETCH*/tmp
 
 * _$RDFETCH/configuration_:
