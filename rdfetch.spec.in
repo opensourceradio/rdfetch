@@ -85,7 +85,7 @@ fi
 %attr(-,%{rduser},%{rduser}) %{homerd}/rdfetch
 
 %changelog
-* Mon Aug 24 2020 David Klann <dklann@broadcasttool.com>
-- Created.
 * Mon Oct 25 2021 David Klann <dklann@broadcasttool.com>
 - Updates to rdfetch and zsh-functions.
+* Mon Aug 24 2020 David Klann <dklann@broadcasttool.com>
+- Created.
