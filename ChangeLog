@@ -29,4 +29,5 @@
 	* Use the feed file extension instead of assuming .mp3
 	* Whitespace cleanup
 	* Clearer prompts and comments
-
+2021-10-26 David Klann <dklann@broadcasttool.com>
+	* Work harder to discern the download file extension
