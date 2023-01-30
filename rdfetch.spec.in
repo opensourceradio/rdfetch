@@ -8,7 +8,7 @@ Name: rdfetch
 # This package complies with Semantic Versioning: http://semver.org/
 %define vMajor 0
 %define vMinor 4
-%define vPatch 14
+%define vPatch 15
 Version: %{vMajor}.%{vMinor}.%{vPatch}
 Release: @RPM_RELEASE@%{?dist}
 Summary: A Rivendell podcast fetcher
