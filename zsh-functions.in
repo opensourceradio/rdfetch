@@ -31,7 +31,7 @@ zmodload zsh/datetime
   vLibMajor=0
   vLibMinor=2
   vLibPatch=18
-  vLibHash='$Hash: 556d950$'
+  vLibHash='$Hash$'
 }
 function zsh_library_version() {
   printf "%d.%d.%d.%d\n" \
@@ -78,8 +78,8 @@ function sendNotification() {
   unset our_commands C D
   ############# END external shell commands used in this function. #############
 
-  local MAILER=$(whence msmtp) ; MAILER="${MAILER:-/usr/bin/msmtp}"
-  local MAILER_CONFIG="${MAILER_CONFIG:-/usr/local/etc/pmw/conf.msmtp}"
+  local MAILER=$(command -v msmtp) ; MAILER="${MAILER:-/usr/bin/msmtp}"
+  local MAILER_CONFIG="${MAILER_CONFIG:-/usr/local/etc/btd/conf.msmtp}"
   local MAILER_ARGS="${MAILER_ARGS:-'--read-recipients --read-envelope-from  --file ${MAILER_CONFIG}'}"
   local hostName="$(${HOSTNAME} -f)"
   local PRETEND="${PRETEND}"
@@ -173,8 +173,8 @@ function notificationSent() {
   local type="${1}" ; shift
   local notificationTime="${1}"
 
-  local SED=$(whence sed) ; SED="${SED:-/bin/sed}"
-  local notifyDB="${NOTIFY_DB:-/usr/local/etc/pmw/notifications}"
+  local SED=$(command -v sed) ; SED="${SED:-/bin/sed}"
+  local notifyDB="${NOTIFY_DB:-/usr/local/etc/btd/notifications}"
   local notification
   local foundPriorNotification=0
   local oneDay=$(( 60 * 60 * 24 ))
@@ -373,7 +373,7 @@ function rdGetStationName() {
   local stationName
   local returnValue=0
 
-  local HOSTNAME=$(whence hostname) ; HOSTNAME="${HOSTNAME:-/bin/hostname}"
+  local HOSTNAME=$(command -v hostname) ; HOSTNAME="${HOSTNAME:-/bin/hostname}"
   local myHostname="$(${HOSTNAME} -s)"
 
   if ! okDatabaseStructure STATIONS:name+ipv4_address ; then
@@ -447,7 +447,7 @@ function rdWebInvoke() {
   # shellcheck disable=SC2206
   curlArguments=( ${*} )
 
-  local CURL=$(whence curl) ; CURL="${CURL:-/usr/bin/curl}"
+  local CURL=$(command -v curl) ; CURL="${CURL:-/usr/bin/curl}"
   local curlVerbosity
   local -r httpServer="$(rdGetWebServer)"
   local -a response
@@ -1114,7 +1114,7 @@ function logit() {
   local interactive="${1}" ; shift
   local message="${1}"
 
-  local LOGGER=$(whence logger) ; LOGGER="${LOGGER:-/usr/bin/logger}"
+  local LOGGER=$(command -v logger) ; LOGGER="${LOGGER:-/usr/bin/logger}"
 
   if (( interactive )) ; then
 

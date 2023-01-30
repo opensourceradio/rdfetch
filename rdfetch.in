@@ -15,7 +15,7 @@
 ##
 ## rdfetch
 ##
-## Copyright 2021, David Klann <dklann@broadcasttool.com>
+## Copyright 2022, David Klann <dklann@broadcasttool.com>
 ##
 ## A Broadcast Tool & Die tool to manage podcast feeds (i.e., RSS,
 ## ATOM, etc.)  and downloads by podget(1), for later import into a
@@ -37,7 +37,7 @@ colors
 # This script complies with Semantic Versioning: http://semver.org/
 vMajor=0
 vMinor=4
-vPatch=14
+vPatch=15
 vHash='$Hash$'
 
 # Get zsh functions necessary for this script.
@@ -723,8 +723,9 @@ function addSimpleEvent() {
   local -r oIFS="${IFS}"
   local -i returnValue
   local cart_number cart_title
+  local query
 
-  if ! okDatabaseStructure "EVENTS:name,EVENT_LINES:event_name+cart_number,CART:number+title" ; then
+  if ! okDatabaseStructure "EVENTS:name,EVENT_LINES:event_name+type+count+event_type+trans_type+cart_number,CART:number+title" ; then
     returnValue=${?}
     error "${0}() (${zsh_eval_context}): This version of ${my_name} is not compatible with Rivendell database version $(rdDatabaseVersion). You need to manually add an Event."
     read ok\?"Press <Enter> to continue. "
@@ -764,8 +765,13 @@ function addSimpleEvent() {
     return 6
   fi
   # Step 2: create an EVENT_LINES row with the Cart number as its sole
-  # item. EVENT_LINES.TYPE defaults to 0, Pre-Import item.
-  if ! doSQL "insert into EVENT_LINES (EVENT_NAME, CART_NUMBER) values ('${event_name}', ${cart_number})" ; then
+  # item. TYPE is 0 for the Pre-Import item, COUNT is 0 for the first
+  # item in Pre-Imports, EVENT_TYPE is 0 for "Cart", TRANS_TYPE is 0
+  # for "Play".
+  query="insert into EVENT_LINES (EVENT_NAME, TYPE, COUNT, EVENT_TYPE, TRANS_TYPE, CART_NUMBER)"
+  query="${query} values"
+  query="${query} ('${event_name}', 0, 0, 0, 0, ${cart_number})"
+  if ! doSQL "${query}" ; then
     warning "Unable to create new Pre-Import item with Cart number ${cart_number} for Event '${cart_title}' (${?})."
     # Avoid leaving an orphaned Event lying around.
     doSQL "delete from EVENTS where NAME = '${event_name}'"
