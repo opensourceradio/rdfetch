@@ -22,7 +22,8 @@
 
 dist_bin_SCRIPTS = rdfetch \
                    podget-wrapper \
-                   zsh-functions
+                   zsh-functions \
+		   rdfetch.desktop
 
 bin_PROGRAMS = sendusr1
 
@@ -39,7 +40,7 @@ EXTRA_DIST = autogen.sh             \
              zsh-functions.in       \
              rdfetch.spec.in        \
              rdfetch-rivendell.menu \
-             rdfetch.desktop        \
+             rdfetch.desktop.in     \
              rdfetch.svg            \
              LICENSE                \
              msmtp.rdfetch          \

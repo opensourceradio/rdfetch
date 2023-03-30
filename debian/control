@@ -1,0 +1,16 @@
+Source: rdfetch
+Section: unknown
+Priority: optional
+Maintainer: David Klann <dklann@broadcasttool.com>
+Build-Depends: debhelper-compat (= 12)
+Standards-Version: 4.4.1
+Homepage: https://github.com/opensourceradio/rdfetch
+
+Package: rdfetch
+Architecture: amd64
+Depends: rivendell, dos2unix, podget, gnome-terminal, libxslt1.1, msmtp, xmlstarlet, zsh, ${shlibs:Depends}, ${misc:Depends}
+Description: A Rivendell podcast fetcher
+ RDFetch is a podcast fetcher that integrates tightly with the
+ Rivendell radio automation system. RDFetch consists of a front end to
+ podget(1), the simple podcast fetcher; and a text-based Rivendell
+ dropbox configurator wizard.

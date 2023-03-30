@@ -434,6 +434,10 @@ exec 2> "/var/tmp/${0:t}.err"
 [[ -n "${PODGET_RUNTIME_DATA}" ]] ||
   exit $(error "${myName}" "Failed to get the setting for 'PODGET_RUNTIME_DATA'. Does '${DIR_CONFIG}/${CONFIG_NOTIFY}' exist?")
 
+# Use our own configuration for msmtp(1) if we have one.
+[[ -n "${PODGET_MAILER_CONFIG}" ]] &&
+  typeset -x MAILER_CONFIG="${PODGET_MAILER_CONFIG}"
+
 # Remember when we started running.
 startTime=${EPOCHSECONDS}
 

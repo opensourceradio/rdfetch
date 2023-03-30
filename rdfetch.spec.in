@@ -8,7 +8,7 @@ Name: rdfetch
 # This package complies with Semantic Versioning: http://semver.org/
 %define vMajor 0
 %define vMinor 4
-%define vPatch 14
+%define vPatch 15
 Version: %{vMajor}.%{vMinor}.%{vPatch}
 Release: @RPM_RELEASE@%{?dist}
 Summary: A Rivendell podcast fetcher
@@ -23,13 +23,16 @@ Source500: %{name}-%{version}.tar.gz.sha256
 
 Requires: zsh >= 5.0
 Requires: coreutils >= 8.5
+Requires: dos2unix >= 6.0.0
 Requires: findutils >= 4.0.0
 Requires: grep >= 2.0.0
 Requires: gawk >= 4.0.0
+Requires: msmtp >= 1.8.0
 Requires: sed >= 4.0.0
 Requires: podget = 0.8.5
 Requires: gnome-terminal
 Requires: libxslt >= 1.0.28
+Requires: xmlstarlet >= 1.6.0
 
 %define tartopdir %{name}-%{version}
 %define homerd /home/rd

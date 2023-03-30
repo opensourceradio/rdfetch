@@ -26,9 +26,11 @@ PODGET_MAILTO=( dklann@broadcasttool.com )
 PODGET_MAILER=msmtp
 
 ###############################################################################################
-# Where the mailer configuration file is
+# Where the mailer configuration file is.
+# This might be a "hard link" to the file in another location.
+# On Debian/Ubuntu, AppArmor requires this to be a "dot-file".
 ###############################################################################################
-PODGET_MAILER_CONFIG=${DIR_CONFIG}/msmtp.rdfetch
+PODGET_MAILER_CONFIG=${DIR_CONFIG}/.msmtprc
 
 ###############################################################################################
 # Mailer command line args.
