@@ -35,3 +35,5 @@
 	* Add xmlstarlet as a dependency
 	* Updates for Rivendell 4
 	* Debian packaging
+2023-03-30 David Klann <dklann@broadcasttool.com>
+	* zsh-functions parity with the standalone version
