@@ -963,7 +963,6 @@ function rdDropboxStatus() {
   fi
 }
 
-
 # Return a DROPBOX numeric ID from a path.
 # Parameters:
 # - the name of the caller
