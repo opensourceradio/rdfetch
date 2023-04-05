@@ -1,6 +1,7 @@
 #!/bin/zsh
-# shellcheck shell=bash disable=SC2016,SC2048,SC2086,SC2116,SC2128,SC2154,SC2155,SC2162,SC2190,SC2207,SC2248,SC2296,SC2298,SC2299,SC2312
+# shellcheck shell=bash disable=SC2016,SC2046,SC2048,SC2086,SC2116,SC2128,SC2154,SC2155,SC2162,SC2190,SC2207,SC2248,SC2296,SC2298,SC2299,SC2312
 # SC2016: Single quotes are used explicitly to ignore parameter expansion.
+# SC2046: shellcheck is too quote conservative.
 # SC2048: shellcheck is too quote conservative.
 # SC2086: All instances of params are quoted where they need to be.
 # SC2116: Not a "Useless echo", we need it to expand the params correctly.
@@ -36,7 +37,7 @@ zmodload zsh/datetime
   vLibRelease=0
   vLibMajor=0
   vLibMinor=2
-  vLibPatch=18
+  vLibPatch=19
   vLibHash='$Hash$'
 }
 
@@ -100,8 +101,6 @@ function sendNotification() {
       if [[ -s "${MAILER_CONFIG}" ]] ; then
         if [[ -n "${MAIL_FROM}" ]] ; then
 
-          # SC2046: we need to leave parameters unquoted here.
-          # shellcheck disable=SC2046
           (
             ${CAT} <<EOF
 To: ${${MAILTO//( |[ ,][ ,])/,}%,}
@@ -200,7 +199,7 @@ function notificationSent() {
     # Have we seen this notification before?
     if (( foundPriorNotification )) ; then
       # Has it been more than a day since we last notified?
-      if (( ( notificationTime - oneDay ) > "${notification##*:}" )) ; then
+      if (( ( notificationTime - oneDay ) > ${notification##*:} )) ; then
         if ${SED} -i -e "s/^${theirName}:${type}:.*$/${theirName}:${type}:${notificationTime}/" "${notifyDB}" ; then
           logit "${0}" 0 "${theirName} NOTICE: '${type}' notification UPDATED at $(strftime %F\ %T ${notificationTime})."
         else
@@ -749,8 +748,6 @@ function rdGetNextCartNumber() {
 
   # Get the next available cart number from the group if the group is
   # constrained with default low and default high numbers.
-  # SC2046: We actually *want* the command expansion to yield separate words.
-  # shellcheck disable=SC2046
   read defaultLowCart defaultHighCart <<<$(doSQL "select DEFAULT_LOW_CART,DEFAULT_HIGH_CART from GROUPS where NAME = '${group}'")
   (( verbose )) && echo "defaultLowCart: ${defaultLowCart}, defaultHighCart: ${defaultHighCart}" >&2
   if (( defaultLowCart )) ; then
