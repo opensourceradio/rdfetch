@@ -37,7 +37,7 @@ zmodload zsh/datetime
   vLibRelease=0
   vLibMajor=0
   vLibMinor=2
-  vLibPatch=20
+  vLibPatch=21
   vLibHash='$Hash$'
 }
 
@@ -48,7 +48,8 @@ function zsh_library_version() {
          "${vLibRelease}" \
          "${vLibMajor}" \
          "${vLibMinor}" \
-         "${vLibPatch}"
+         "${vLibPatch}" \
+	 "${${${vLibHash#*Hash: }//\$/}/Hash/prerelease}"
 }
 
 # sendNotification use the configured mailer to send email to one or more
