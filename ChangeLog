@@ -31,3 +31,13 @@
 	* Clearer prompts and comments
 2021-10-26 David Klann <dklann@broadcasttool.com>
 	* Work harder to discern the download file extension
+2022-02-02 David Klann <dklann@broadcasttool.com>
+	* Add xmlstarlet as a dependency
+	* Updates for Rivendell 4
+	* Debian packaging
+2023-03-30 David Klann <dklann@broadcasttool.com>
+	* zsh-functions parity with the standalone version
+2023-05-16 David Klann <dklann@broadcasttool.com>
+	* zsh-functions overhaul
+	* zsh-functions shellcheck audit
+	* zsh-functions continued parity with standalone

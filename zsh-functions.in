@@ -3,12 +3,20 @@
 # SC2016: Single quotes are used explicitly to ignore parameter expansion.
 # SC2046: shellcheck is too quote conservative.
 # SC2048: shellcheck is too quote conservative.
+# SC2046: shellcheck is too quote conservative.
+# SC2048: shellcheck is too quote conservative.
 # SC2086: All instances of params are quoted where they need to be.
 # SC2116: Not a "Useless echo", we need it to expand the params correctly.
 # SC2128: shellcheck thinks ${query} is an array because of a previous local declaration.
 # SC2154: Used but not assigned: these values are set by the shell.
 # SC2155: Ignoring all return values in assignments.
 # SC2190: ZSH: associative array assignment "just works"(TM).
+# SC2207: "prefer mapfile or read -a" these are all ZSH-isms.
+# SC2248: shellcheck is too quote conservative.
+# SC2296: ZSH permits bracketed parameter expansions starting with ().
+# SC2298: ZSH permits nested parameter expansions.
+# SC2299: ZSH permits nested parameter expansions.
+# SC2312: No need to invoke commands separately.
 # SC2207: "prefer mapfile or read -a" these are all ZSH-isms.
 # SC2248: shellcheck is too quote conservative.
 # SC2296: ZSH permits bracketed parameter expansions starting with ().
@@ -42,6 +50,9 @@ zmodload zsh/datetime
 
 # zsh_library_version returns a string containing a "dotted quad" of this
 # library's version number.
+
+# zsh_library_version returns a string containing a "dotted quad" of this
+# library's version number.
 function zsh_library_version() {
   printf "%d.%d.%d.%d-%s\n" \
          "${vLibRelease}" \
@@ -49,8 +60,17 @@ function zsh_library_version() {
          "${vLibMinor}" \
          "${vLibPatch}" \
 	 "${${${vLibHash#*Hash: }//\$/}/Hash/prerelease}"
+         "${vLibPatch}" \
+	 "${${${vLibHash#*Hash: }//\$/}/Hash/prerelease}"
 }
 
+# sendNotification use the configured mailer to send email to one or more
+# addresses. This prefers to use msmtp(1). It will use postfix(1)'s sendmail if
+# msmtp is not found and if /etc/postfix/main.cf exists and has a "relayhost"
+# parameter configured.
+#
+# sendNotification sends no more than one notification for each type in 24 hours
+# (and let the recipients know that they will see no more than one per day).
 # sendNotification use the configured mailer to send email to one or more
 # addresses. This prefers to use msmtp(1). It will use postfix(1)'s sendmail if
 # msmtp is not found and if /etc/postfix/main.cf exists and has a "relayhost"
@@ -883,6 +903,7 @@ function rdCreateEmptyCart() {
   return "${returnValue}"
 }
 
+# rdDropboxStatus determines the dropbox status for all dropboxes on this host.
 # rdDropboxStatus determines the dropbox status for all dropboxes on this host.
 function rdDropboxStatus() {
   local -r myName="${1}" ; shift
