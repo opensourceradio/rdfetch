@@ -1,14 +1,20 @@
 #!/bin/zsh
-# shellcheck shell=bash disable=SC2016,SC2086,SC2116,SC2128,SC2154,SC2155,SC2162,SC2190,SC2207
+# shellcheck shell=bash disable=SC2016,SC2046,SC2048,SC2086,SC2116,SC2128,SC2154,SC2155,SC2190,SC2207,SC2248,SC2296,SC2298,SC2299,SC2312
 # SC2016: Single quotes are used explicitly to ignore parameter expansion.
+# SC2046: shellcheck is too quote conservative.
+# SC2048: shellcheck is too quote conservative.
 # SC2086: All instances of params are quoted where they need to be.
 # SC2116: Not a "Useless echo", we need it to expand the params correctly.
-# SC2128: ZSH expands arrays without specifying ${param[*]}.
+# SC2128: shellcheck thinks ${query} is an array because of a previous local declaration.
 # SC2154: Used but not assigned: these values are set by the shell.
 # SC2155: Ignoring all return values in assignments.
-# SC2162: Because we do not ever encounter backslashes.
 # SC2190: ZSH: associative array assignment "just works"(TM).
-# SC2207: "prefer mapfile or read -a" these are all ZSH-isms
+# SC2207: "prefer mapfile or read -a" these are all ZSH-isms.
+# SC2248: shellcheck is too quote conservative.
+# SC2296: ZSH permits bracketed parameter expansions starting with ().
+# SC2298: ZSH permits nested parameter expansions.
+# SC2299: ZSH permits nested parameter expansions.
+# SC2312: No need to invoke commands separately.
 
 ##############################################################################
 #
@@ -30,23 +36,28 @@ zmodload zsh/datetime
   vLibRelease=0
   vLibMajor=0
   vLibMinor=2
-  vLibPatch=18
-  vLibHash='$Hash: 556d950$'
+  vLibPatch=23
+  vLibHash='$Hash$'
 }
+
+# zsh_library_version returns a string containing a "dotted quad" of this
+# library's version number.
 function zsh_library_version() {
-  printf "%d.%d.%d.%d\n" \
+  printf "%d.%d.%d.%d-%s\n" \
          "${vLibRelease}" \
          "${vLibMajor}" \
          "${vLibMinor}" \
-         "${vLibPatch}"
+         "${vLibPatch}" \
+	 "${${${vLibHash#*Hash: }//\$/}/Hash/prerelease}"
 }
 
-# Use the configured mailer to send email to one or more
-# addresses. This relies heavily on msmtp(1) and its configuration
-# file.
-# Send no more than one notification for each type in 24 hours (and
-# let the recipients know that they will see no more than one per
-# day).
+# sendNotification use the configured mailer to send email to one or more
+# addresses. This prefers to use msmtp(1). It will use postfix(1)'s sendmail if
+# msmtp is not found and if /etc/postfix/main.cf exists and has a "relayhost"
+# parameter configured.
+#
+# sendNotification sends no more than one notification for each type in 24 hours
+# (and let the recipients know that they will see no more than one per day).
 function sendNotification() {
   local myName="${1:?Who am I?}" ; shift
   local MAILTO="${1:?Need one or more email addresses to send to.}" ; shift
@@ -54,48 +65,82 @@ function sendNotification() {
   local message="${1:?Need a message to send for the notification.}" ; shift
   local messagefile="${1}" # optional text filename to attach
 
-############ BEGIN external shell commands used in this function. ############
-  # This function uses these 7 external commands.
+  local -i returnValue=1
+  local my_domain_name
+
+  ############ BEGIN external shell commands used in this function. ############
+  # This function uses these 11 external commands.
   # Look for them in their upper case, parameter expanded form.
-  local -a our_commands
-  our_commands=( awk base64 cat dos2unix hostname logger uuidgen )
+  our_commands=( awk base64 cat cut getent grep hostname id tee unix2dos uuidgen )
   # Find the executables we need; this uses some basic shell and a ZSH trick:
   # the (U) in the eval says to evaluate the parameter as all upper case
   # letters. This snippet generates shell parameters representing the upper case
   # equivalent of the command names and sets the parameter values to the full path
   # of the commands.
   # Refresh this segment in Emacs by marking the appropriate region (or the whole
-  # buffer with C-xH) and replacing it with C-uM-|mk-ourCommands (shell-command-on-region).
+  # buffer with C-xH) and replacing it with C-uM-|mk-ourCommands --func (shell-command-on-region).
   local C D
+  # SC2048: shellcheck overly aggressive quote recommendation.
+  # shellcheck disable=SC2048
   for C in ${our_commands[*]} ; do
     # shellcheck disable=SC2154 # ZSH: ${path} is set by the shell.
     for D in ${path} ; do
-      # shellcheck disable=SC2140,SC2086 # we need the quotes
+      # shellcheck disable=SC2140,SC2086,SC2296 # we need the quotes, ZSH-specific expansion
       [[ -x "${D}/${C}" ]] && { eval "${(U)C//-/_}"="${D}/${C}" ; break ; }
     done
+    # shellcheck disable=SC2296 # ZSH-specific expansion
     [[ -x $(eval print \$"${(U)C//-/_}") ]] || { print "Cannot find ${C}! Done."; return 1 ; }
   done
   unset our_commands C D
   ############# END external shell commands used in this function. #############
 
-  local MAILER=$(whence msmtp) ; MAILER="${MAILER:-/usr/bin/msmtp}"
-  local MAILER_CONFIG="${MAILER_CONFIG:-/usr/local/etc/pmw/conf.msmtp}"
-  local MAILER_ARGS="${MAILER_ARGS:-'--read-recipients --read-envelope-from  --file ${MAILER_CONFIG}'}"
+  local MAILER_CONFIG="${MAILER_CONFIG:-/usr/local/etc/btd/conf.msmtp}"
+  local MAILER MAIL_FROM
+  local -a MAILER_ARGS
+  # Look for msmtp(1) if the MAILER_CONFIG exists *and* is readable.
+  if [[ -f "${MAILER_CONFIG}" ]] && [[ -r "${MAILER_CONFIG}" ]] ; then
+      MAILER=$(command -v msmtp) ; MAILER="${MAILER:-/usr/bin/msmtp}"
+      if [[ -n "${MAILER}" ]] && [[ -x "${MAILER}" ]] ; then
+	  MAILER_ARGS=( --read-recipients --read-envelope-from --file "${MAILER_CONFIG}" )
+      fi
+      MAIL_FROM=$(${AWK} '/^user /{print $2}' "${MAILER_CONFIG}")
+  fi
+  # Look for sendmail(1) and a standard working postfix(1) configuration if
+  # unable to find msmtp(1).
+  if [[ -z "${MAILER_ARGS[*]}" ]] ; then
+    if [[ -d /etc/postfix ]] ; then
+      if [[ -x /usr/sbin/sendmail ]] && ${GREP} --quiet '^relayhost' /etc/postfix/main.cf ; then
+	MAILER=/usr/sbin/sendmail
+	# See sendmail(1) for these args.
+	MAILER_ARGS=( -bm -t )
+	my_domain_name=$(${AWK} -F' ?= ?' '/^mydomain /{print $2}' /etc/postfix/main.cf)
+      fi
+    fi
+  fi
+  # Bail if unable to find a working MTA.
+  if [[ -z "${MAILER_ARGS[*]}" ]] ; then
+    logit "${0}" 0 "Unable to find a working and configured message transfer agent (MTA). Unable to continue."
+    return ${returnValue}
+  fi
   local hostName="$(${HOSTNAME} -f)"
   local PRETEND="${PRETEND}"
   local startTime="${EPOCHSECONDS}"
-  local returnValue=0
-  local MAIL_FROM=$(${AWK} '/^user /{print $2}' "${MAILER_CONFIG}")
 
-  if ! notificationSent "${myName}" "${type}" "${startTime}" ; then
-    if [[ -x "${MAILER}" ]] ; then
-      if [[ -s "${MAILER_CONFIG}" ]] ; then
-        if [[ -n "${MAIL_FROM}" ]] ; then
+  # A notification was already sent for this ${type}, no need to continue.
+  if notificationSent "${myName}" "${type}" "${startTime}" ; then
+    return 0
+  fi
 
-          # SC2046: we need to leave parameters unquoted here.
-          # shellcheck disable=SC2046
-          (
-            ${CAT} <<EOF
+  # Ensure we have a "From" address.
+  if [[ -z "${MAIL_FROM}" ]] ; then
+    local my_user_name=$(${GETENT} passwd $(${ID} -u) | ${CUT} -d: -f1)
+    MAIL_FROM="${my_user_name}@${my_domain_name}"
+  fi
+
+  (
+    # MAILTO parameter expansion turns spaces and commas into single comma
+    # separating email addresses.
+    ${UNIX2DOS} <<EOF
 To: ${${MAILTO//( |[ ,][ ,])/,}%,}
 From: ${MAIL_FROM}
 Reply-To: ${MAIL_FROM}
@@ -124,8 +169,8 @@ entering (or pasting) the command:
   journalctl _COMM=logger SYSLOG_IDENTIFIER=notificationSent
 
 EOF
-            if [[ -n "${messagefile}" ]] && [[ -s "${messagefile}" ]] ; then
-              ${CAT} <<EOF
+    if [[ -n "${messagefile}" ]] && [[ -s "${messagefile}" ]] ; then
+      ${UNIX2DOS} <<EOF
 ------------${startTime}
 Content-Type: text/plain; charset=UTF-8;
  name="${messagefile:t}"
@@ -133,48 +178,27 @@ Content-Transfer-Encoding: base64
 Content-Disposition: attachment;
  filename="${messagefile:t}"
 
-$(${DOS2UNIX} < "${messagefile}" | ${BASE64})
+$(${CAT} < "${messagefile}" | ${BASE64})
 EOF
-            fi
+    fi
 
-            ${CAT} <<EOF
+    ${UNIX2DOS} <<EOF
 ------------${startTime}--
 EOF
-          ) | ${MAILER} $(eval echo "${MAILER_ARGS}") "${PRETEND}"
+  ) | ${TEE} /tmp/mail-${type}.out | ${MAILER} ${MAILER_ARGS[*]} ${PRETEND}
 
-        else
-
-          ${LOGGER} -t "${0:t}" -p local7.err -i "ERROR: Cannot find a From: address in '${MAILER_CONFIG}'. Cannot send messages."
-          returnValue=3
-
-        fi
-
-      else
-
-        ${LOGGER} -t "${0:t}" -p local7.err -i "ERROR: Cannot find mailer configuration '${MAILER_CONFIG}'. Cannot send messages."
-        returnValue=2
-
-      fi
-
-    else
-
-      ${LOGGER} -t "${0:t}" -p local7.err -i "ERROR: Cannot find executable program '${MAILER}'. Cannot send messages."
-      returnValue=1
-
-    fi
-  fi
-
-  return "${returnValue}"
+  return ${returnValue}
 }
 
-# Make a record of the type and time of a notification
+# notificationSent records the type and time of a notification sent with
+# sendNotification().
 function notificationSent() {
   local theirName="${1}" ; shift
   local type="${1}" ; shift
   local notificationTime="${1}"
 
-  local SED=$(whence sed) ; SED="${SED:-/bin/sed}"
-  local notifyDB="${NOTIFY_DB:-/usr/local/etc/pmw/notifications}"
+  local SED=$(command -v sed) ; SED="${SED:-/bin/sed}"
+  local notifyDB="${NOTIFY_DB:-/usr/local/etc/btd/notifications}"
   local notification
   local foundPriorNotification=0
   local oneDay=$(( 60 * 60 * 24 ))
@@ -182,7 +206,7 @@ function notificationSent() {
 
   # Is there a notification database?
   if [[ -f "${notifyDB}" ]] ; then
-    while read notification ; do
+    while read -r notification ; do
       if [[ "${notification%:*}" == "${theirName}:${type}" ]] ; then
         foundPriorNotification=1
         break
@@ -191,7 +215,7 @@ function notificationSent() {
     # Have we seen this notification before?
     if (( foundPriorNotification )) ; then
       # Has it been more than a day since we last notified?
-      if (( ( notificationTime - oneDay ) > "${notification##*:}" )) ; then
+      if (( (notificationTime - oneDay) > ${notification##*:} )) ; then
         if ${SED} -i -e "s/^${theirName}:${type}:.*$/${theirName}:${type}:${notificationTime}/" "${notifyDB}" ; then
           logit "${0}" 0 "${theirName} NOTICE: '${type}' notification UPDATED at $(strftime %F\ %T ${notificationTime})."
         else
@@ -227,9 +251,9 @@ function notificationSent() {
   return "${returnValue}"
 }
 
-# Make mysql calls look a bit more asthetically pleasing. The return
-# value of this shell funtion is the exit value of the mysql command
-# invocation.
+# doSQL performs queries using the mysql(1) CLI command. doSQL makes mysql calls
+# look a bit more asthetically pleasing. The return value of this shell funtion
+# is the exit value of the mysql command invocation.
 function doSQL() {
   local -r statement="${1:?Need a database query to run.}"
   local useMyCNF=0
@@ -321,10 +345,14 @@ function doSQL() {
   fi
 }
 
+# rdDatabaseVersion returns the DB column from the Rivendell VERSION table.
 function rdDatabaseVersion() {
   doSQL "select DB from VERSION"
 }
 
+# getMyIPAddresses returns a string containing a Space-separated list of IP
+# addresses for this computer. The algorithm excludes IP addresses for the
+# loopback interface and virtual interfaces matching "virbr" or "tun".
 function getMyIPAddresses() {
   local -a ipAddresses
   local returnValue=0
@@ -364,16 +392,14 @@ function getMyIPAddresses() {
   return "${returnValue}"
 }
 
-
-
-# Get this hosts Rivendell STATION name. Return TRUE or FALSE
-# depending on whether we could figure the name out.
+# rdGetStationName returns this hosts Rivendell STATION name. Return TRUE (Zero)
+# or FALSE (non-Zero) depending on whether the database query is successful.
 function rdGetStationName() {
   local -a myIP
   local stationName
   local returnValue=0
 
-  local HOSTNAME=$(whence hostname) ; HOSTNAME="${HOSTNAME:-/bin/hostname}"
+  local HOSTNAME=$(command -v hostname) ; HOSTNAME="${HOSTNAME:-/bin/hostname}"
   local myHostname="$(${HOSTNAME} -s)"
 
   if ! okDatabaseStructure STATIONS:name+ipv4_address ; then
@@ -412,7 +438,8 @@ function rdGetStationName() {
   return "${returnValue}"
 }
 
-# Get the Rivendell Web Server (HTTP_STATION) for this computer.
+# rdGetWebServer returns the hostname of the Rivendell Web Server (HTTP_STATION)
+# for this computer.
 function rdGetWebServer() {
   local returnValue=1
 
@@ -435,9 +462,9 @@ function rdGetWebServer() {
   return "${returnValue}"
 }
 
-# Use the Rivendell Web API to execute a command. Unlike most other
-# functions in this library, the arg 'verbose' *must* be set to either
-# '0' or a positive integer.
+# rdWebInvoke uses curl(1) and the Rivendell Web API to execute a command.
+# Unlike most other functions in this library, the arg 'verbose' *must* be set
+# to either '0' or a positive integer.
 function rdWebInvoke() {
   local verbose="${1}" ; shift
   local command="${1}" ; shift
@@ -447,7 +474,7 @@ function rdWebInvoke() {
   # shellcheck disable=SC2206
   curlArguments=( ${*} )
 
-  local CURL=$(whence curl) ; CURL="${CURL:-/usr/bin/curl}"
+  local CURL=$(command -v curl) ; CURL="${CURL:-/usr/bin/curl}"
   local curlVerbosity
   local -r httpServer="$(rdGetWebServer)"
   local -a response
@@ -474,7 +501,7 @@ function rdWebInvoke() {
   # existing with NO password.
   response=( $(${CURL} --include "${curlVerbosity}" -d LOGIN_NAME='user' -d PASSWORD='' -d "COMMAND=${command}" ${curlArguments:+'-d'} ${(zj: -d :)curlArguments} "http://${httpServer}/rd-bin/rdxport.cgi") )
   returnValue="${?}"
-  while read responseLine ; do
+  while read -r responseLine ; do
     if echo "${responseLine}" | grep --quiet --perl-regexp --ignore-case '^http/\d+\.\d+ 200 ok' ; then
       result=OK
       break
@@ -506,8 +533,9 @@ function rdWebInvoke() {
   return "${returnValue}"
 }
 
-# Use the Rivendell Web API to list the cart and cut details for the
-# specified CART.
+# rdListAllCarts uses the Rivendell Web API to list the cart and cut details for
+# the Carts in the provided Group name.
+#
 # Note that as of Rivendell version 2.10.3 ListCarts is broken if you
 # do not provide search parameters to the "query". This is fixed in
 # 2.15.1, but for now we *REQUIRE* a GROUP in which to list all CARTs.
@@ -530,8 +558,9 @@ function rdListAllCarts() {
   return "${returnValue}"
 }
 
-# Use the Rivendell Web API to list the CART. The second
-# arg, 0 (default) or 1 to list CUTS.
+# rdListCart uses the Rivendell Web API to list the Cart with the provided
+# number. Optionally, rdListCart includes the Cuts if the second argument, is 1
+# (default 0).
 function rdListCart() {
   local cartNumber="${1}" ; shift
   local withCuts="${1:-0}"
@@ -552,8 +581,8 @@ function rdListCart() {
   return "${returnValue}"
 }
 
-# Use the Rivendell Web API to list all the CUTS for the specified
-# CART.
+# rdListCuts uses the Rivendell Web API to list all the Cuts for the specified
+# Cart.
 function rdListCuts() {
   local cartNumber="${1}" ; shift
   local verbose="${1:-0}"
@@ -574,8 +603,8 @@ function rdListCuts() {
   return "${returnValue}"
 }
 
-# Use the Rivendell Web API to delete the CART, all its CUTS, and the
-# actual audio file for the specified CART.
+# rdDropCart uses the Rivendell Web API to delete the Cart, all its Cuts, and
+# the actual audio file for the specified Cart.
 function rdDropCart() {
   local cartNumber="${1}" ; shift
   local verbose="${1:-0}"
@@ -596,7 +625,7 @@ function rdDropCart() {
   return "${returnValue}"
 }
 
-# Use the Rivendell Web API to delete the specified CUT, and the
+# rdDropCut uses the Rivendell Web API to delete the specified Cut, and the
 # actual audio file.
 function rdDropCut() {
   local cartNumber="${1}" ; shift
@@ -614,17 +643,14 @@ function rdDropCut() {
   result=( $(rdWebInvoke "${verbose}" "${command}" ${curlArguments[*]}) )
   returnValue="${?}"
 
-  echo "${result[*]}"
-  return "${returnValue}"
-
   [[ "${result:-MISSING RESULT}" = 'OK' ]] && returnValue=0
   echo "${result:-MISSING RESULT}"
   return "${returnValue}"
 }
 
-# Use the Rivendell Web API to list all the SERVICES,
-# Optionally, list only services that have a valid
-# VoiceTracking configuration.
+# rdListServices use the Rivendell Web API to list all the Services. Optionally,
+# rdListServices lists only Services that have a valid VoiceTracking
+# configuration.
 function rdListServices() {
   local -r trackable="${1}" ; shift
   local -r verbose="${1:-0}"
@@ -645,7 +671,7 @@ function rdListServices() {
   return "${returnValue}"
 }
 
-# Use the Rivendell Web API to list all the GROUPS.
+# rdListGroups uses the Rivendell Web API to list all the Groups.
 function rdListGroups() {
   local -r verbose="${1:-0}"
 
@@ -665,7 +691,9 @@ function rdListGroups() {
   return "${returnValue}"
 }
 
-# Get a Rivendell CART NUMBER from a TITLE (full or partial).
+# rdCartNumberFromTitle returns the Rivendell Cart number from the provided
+# title. The search in this function is for an exact match of the provided
+# title. See also, rdCartTitleFromPartial below.
 function rdCartNumberFromTitle() {
   local title="${1:?Need a CART TITLE string to search.}" ; shift
   local verbose="${1}"
@@ -673,7 +701,8 @@ function rdCartNumberFromTitle() {
   doSQL "select NUMBER from CART where TITLE = '${title}'"
 }
 
-# Get a Rivendell CART TITLE from a partial TITLE.
+# rdCartTitleFromPartial returns the Rivendell Cart title from the provided
+# partial title. Return value is that of doSQL().
 function rdCartTitleFromPartial() {
   local title="${1:?Need a CART TITLE string to search.}" ; shift
   local verbose="${1}"
@@ -681,7 +710,8 @@ function rdCartTitleFromPartial() {
   doSQL "select TITLE from CART where TITLE like '%${title}%'"
 }
 
-# Get a Rivendell CART TITLE from a CART NUMBER.
+# rdCartTitleFromNumber returns the Rivendell Cart title for the provided Cart
+# number.
 function rdCartTitleFromNumber() {
   local number="${1:?Need a CART NUMBER to look up.}" ; shift
   local verbose="${1}"
@@ -689,6 +719,7 @@ function rdCartTitleFromNumber() {
   doSQL "select TITLE from CART where NUMBER = ${number}"
 }
 
+# rdCartGroupFromNumber returns the Group name for the provided Cart number.
 function rdCartGroupFromNumber() {
   local number="${1:?Need a CART NUMBER to search.}" ; shift
   local verbose="${1}"
@@ -696,6 +727,8 @@ function rdCartGroupFromNumber() {
   doSQL "select GROUP_NAME from CART where NUMBER = ${number}"
 }
 
+# rdMaxCartNumberForGroup returns the highest Cart number for the provided
+# Group.
 function rdMaxCartNumberForGroup() {
   local group="${1:?Need a GROUP_NAME from which to get the next CART NUMBER.}" ; shift
   local verbose="${1}"
@@ -710,6 +743,8 @@ function rdMaxCartNumberForGroup() {
   echo "${maxCartNum}"
 }
 
+# rdGetNextCartNumber returns the next available Cart number in the provided
+# Group.
 function rdGetNextCartNumber() {
   local group="${1:?Need a GROUP_NAME from which to get the next CART NUMBER.}" ; shift
   local verbose="${1}"
@@ -726,9 +761,7 @@ function rdGetNextCartNumber() {
 
   # Get the next available cart number from the group if the group is
   # constrained with default low and default high numbers.
-  # SC2046: We actually *want* the command expansion to yield separate words.
-  # shellcheck disable=SC2046
-  read defaultLowCart defaultHighCart <<<$(doSQL "select DEFAULT_LOW_CART,DEFAULT_HIGH_CART from GROUPS where NAME = '${group}'")
+  read -r defaultLowCart defaultHighCart <<<$(doSQL "select DEFAULT_LOW_CART,DEFAULT_HIGH_CART from GROUPS where NAME = '${group}'")
   (( verbose )) && echo "defaultLowCart: ${defaultLowCart}, defaultHighCart: ${defaultHighCart}" >&2
   if (( defaultLowCart )) ; then
 
@@ -764,7 +797,7 @@ function rdGetNextCartNumber() {
     # range for this group), so find the next available cart number
     # outside all group ranges.
     doSQL 'select DEFAULT_LOW_CART,DEFAULT_HIGH_CART from GROUPS where DEFAULT_LOW_CART > 0 order by DEFAULT_LOW_CART' |
-      while read defaultLowCart defaultHighCart ; do
+      while read -r defaultLowCart defaultHighCart ; do
 
         # Skip this group if its range falls within a previous group
         # range (yes, this can happen).
@@ -809,6 +842,7 @@ function rdGetNextCartNumber() {
   return "${returnValue}"
 }
 
+# rdCreateEmptyCart creates an empty Cart in the Rivendell Library.
 function rdCreateEmptyCart() {
   local group="${1:?Need to specify a GROUP_NAME in which to create the new CART.}" ; shift
   local title="${1:?Need a CART TITLE string to search.}" ; shift
@@ -849,8 +883,7 @@ function rdCreateEmptyCart() {
   return "${returnValue}"
 }
 
-# Determine the dropbox status for all dropboxes on this host.
-# restarted.
+# rdDropboxStatus determines the dropbox status for all dropboxes on this host.
 function rdDropboxStatus() {
   local -r myName="${1}" ; shift
   local -r interactive="${1}" ; shift
@@ -957,8 +990,7 @@ function rdDropboxStatus() {
   fi
 }
 
-
-# Return a DROPBOX numeric ID from a path.
+# rdGetDropboxIDFromPath returns a DROPBOX numeric ID from the given path.
 # Parameters:
 # - the name of the caller
 # - a string representing a path prefix
@@ -988,8 +1020,8 @@ function rdGetDropboxIDFromPath() {
   if (( ${#id} > 1 )) ; then
     logit "${myName}" "${interactive}" "Unable to determine the exact DROPBOX ID for ${pathPrefix}. Make sure this is a unique path."
   else
-    if (( id[1] )) ; then
-      echo "${id}"
+    if ((id[1])) ; then
+      echo "${id[1]}"
       returnValue=0
     else
       echo -1
@@ -999,8 +1031,8 @@ function rdGetDropboxIDFromPath() {
   return "${returnValue}"
 }
 
-# Reset a dropbox by deleting entries in DROPBOX_PATHS. See also
-# rivendell-source-code/rdadmin/edit_dropbox.cpp:EditDropbox::resetData()
+# rdResetDropbox resets a dropbox by deleting entries in DROPBOX_PATHS. See also
+# rivendell-source-code/rdadmin/edit_dropbox.cpp:EditDropbox::resetData().
 # shellcheck disable=SC2178
 function rdResetDropbox() {
   local -r myName="${1}" ; shift
@@ -1028,7 +1060,8 @@ function rdResetDropbox() {
   return
 }
 
-# Determine whether the database structure matches our expectation.
+# okDatabaseStructure determines whether the database structure matches our
+# expectation.
 # Parameters:
 # - comma-separated list of table:column[+column...] tuples
 # - (optional) verbose boolean
@@ -1087,14 +1120,14 @@ function getYesNo() {
     print "${our_prompt} [y or n] \c" > /dev/tty
     # response is actually used, but in a non-Bash way, see below.
     # shellcheck disable=SC2034
-    read response < /dev/tty
+    read -r response < /dev/tty
     ((again=1))
   done
   [[ "${(L)response}" =~ ^n ]] && return 1
   return 0
 }
 
-# Convert milliseconds to [HH:]MM:SS.
+# ms2HMS converts milliseconds to [HH:]MM:SS.
 function ms2HMS() {
   local milliseconds="${1:?Need some milliseconds}"
   typeset -Z 2 Hours Minutes Seconds
@@ -1107,14 +1140,14 @@ function ms2HMS() {
   print "${Hours:+${Hours}:}${Minutes:+${Minutes}:}${Seconds}"
 }
 
-# Log a message to either syslog (non-interactive) or STDOUT
+# logit logs a message to either syslog (non-interactive) or STDOUT
 # (interactive).
 function logit() {
   local caller="${1}" ; shift
   local interactive="${1}" ; shift
   local message="${1}"
 
-  local LOGGER=$(whence logger) ; LOGGER="${LOGGER:-/usr/bin/logger}"
+  local LOGGER=$(command -v logger) ; LOGGER="${LOGGER:-/usr/bin/logger}"
 
   if (( interactive )) ; then
 
